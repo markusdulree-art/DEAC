@@ -94,3 +94,47 @@ The kernel driver and Windows service/installer require a Windows + Visual Studi
 ## Remaining deployment work
 
 The production release pipeline still requires organization-specific signing certificates, the final Authenticode publisher policy, deployment packaging, and a signed update service/manifest infrastructure. Those are release secrets and deployment credentials, not source-code features.
+
+
+## Evidence graph / process identity layer (v4)
+
+The service now reconstructs process instances rather than treating a PID as a permanent identity. A process instance is keyed by `(PID, creation-time token)`, with its observed image path retained for attribution. This prevents evidence from one process instance being correlated with a later process that reused the same PID.
+
+Kernel events are normalized into a temporal evidence graph. The graph currently models:
+
+- process creation/exit
+- image-load observations
+- dangerous and read-only handle observations
+- executable private-memory observations
+- queue-loss observations
+
+Correlations are explicit and time-bounded. A suspicious module or executable private PE region can receive additional weight only when the graph can associate the observations with the same target process instance and, for handle correlations, the same source process instance. Ordinary module loads do not contribute a memory-correlation edge.
+
+The service also detects kernel event sequence gaps and polls the driver for cumulative queue-drop counts. Telemetry loss is recorded as a data-quality/integrity event instead of being silently ignored. Driver status now exposes callback capability bits and queue-drop state.
+
+The protocol version was bumped to **4** because `DriverStatus` gained the queue-drop field and the capability contract was expanded.
+
+### Current evidence flow
+
+```text
+Kernel / user observations
+        |
+        v
+Process identity + event normalization
+        |
+        v
+Temporal evidence graph
+        |
+        +--> module provenance
+        +--> handle attribution
+        +--> memory-state evidence
+        +--> telemetry-quality state
+        |
+        v
+Policy evidence + correlation boost
+        |
+        v
+Allow / Monitor / Review / Enforce
+```
+
+The graph is deliberately an evidence layer rather than a direct ban mechanism. Correlation strength is bounded, and loss of telemetry is represented explicitly so the policy layer can account for incomplete observation.

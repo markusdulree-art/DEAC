@@ -13,3 +13,8 @@ The kernel/service boundary is a versioned IOCTL ABI.
 7. Game-specific telemetry is not part of the kernel ABI.
 
 This boundary is designed to reduce the blast radius of a compromised or buggy user-mode component.
+
+
+## Protocol v4 changes
+
+`kProtocolVersion` is now 4. `DriverStatus` includes `queue_dropped`, and `flags` exposes callback/queue capability bits from `DriverCapability`. Consumers must reject mismatched versions rather than guessing the layout.

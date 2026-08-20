@@ -10,3 +10,4 @@ VOID DeacUnregisterCallbacks();
 NTSTATUS DeacStartHeartbeat();
 VOID DeacStopHeartbeat();
 NTSTATUS DeacQueryPlatformSecurity(deac::protocol::PlatformSecurityState* outState);
+ULONG DeacCallbackCapabilityFlags();

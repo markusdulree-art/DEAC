@@ -25,6 +25,8 @@ if (WIN32)
         service/src/deac_config.cpp
         service/src/audit_log.cpp
         service/src/module_inventory.cpp
+        service/src/process_identity.cpp
+        service/src/evidence_graph.cpp
     )
     target_include_directories(deac_service PRIVATE service/include common/include)
     target_link_libraries(deac_service PRIVATE deac_common advapi32 bcrypt wintrust crypt32 psapi nlohmann_json::nlohmann_json)
@@ -47,6 +49,8 @@ add_executable(deac_tests
     service/src/deac_detection.cpp
     service/src/deac_policy.cpp
     service/src/deac_config.cpp
+    service/src/process_identity.cpp
+    service/src/evidence_graph.cpp
 )
 target_include_directories(deac_tests PRIVATE service/include common/include)
 add_test(NAME deac_tests COMMAND deac_tests)

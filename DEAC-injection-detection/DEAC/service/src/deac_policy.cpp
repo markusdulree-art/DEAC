@@ -44,8 +44,11 @@ Result Engine::evaluate() const {
 
     for (const auto& e : evidence_) {
         const float quality = std::clamp(e.data_quality, 0.0f, 1.0f);
-        const float anomaly = std::clamp(e.anomaly, 0.0f, 1.0f);
+        const float anomaly = std::clamp(e.anomaly + e.correlation_boost, 0.0f, 1.0f);
         if (quality >= 0.8f && anomaly >= config_.review_threshold) ++high_confidence;
+        if (e.correlation_edges >= 2 && quality >= 0.75f && anomaly >= config_.review_threshold) {
+            ++high_confidence;
+        }
         weighted_sum += anomaly * quality;
         weight += quality;
         result.integrity_flags |= static_cast<std::uint32_t>(e.event_type ==

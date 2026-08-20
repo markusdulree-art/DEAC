@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <mutex>
 #include <vector>
+#include <string>
 
 namespace deac::policy {
 
@@ -23,6 +24,11 @@ struct Evidence final {
     std::uint32_t event_type{};
     std::uint64_t pid{};
     std::uint64_t tid{};
+    std::uint64_t source_pid{};
+    std::uint64_t source_birth_token{};
+    std::uint32_t correlation_edges{};
+    float correlation_boost{};
+    std::string evidence_key;
 };
 
 struct Result final {

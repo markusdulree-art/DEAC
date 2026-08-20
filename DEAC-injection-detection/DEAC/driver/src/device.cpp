@@ -38,6 +38,14 @@ NTSTATUS DeviceControl(PDEVICE_OBJECT, PIRP irp) {
         status.size = sizeof(status);
         status.version = deac::protocol::kProtocolVersion;
         status.state = 1;
+        status.uptime_ms = 0;
+        status.queue_dropped = deac::kernel::g_event_queue.Dropped();
+        status.flags = DeacCallbackCapabilityFlags();
+        if (deac::kernel::g_event_queue.Dropped() == 0) {
+            status.flags |= static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueHealthy);
+        } else {
+            status.flags &= ~static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueHealthy);
+        }
         status.platform = g_platform;
         RtlCopyMemory(irp->AssociatedIrp.SystemBuffer, &status, sizeof(status));
         return Complete(irp, STATUS_SUCCESS, sizeof(status));

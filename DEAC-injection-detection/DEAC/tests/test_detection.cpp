@@ -2,6 +2,8 @@
 #include "deac_policy.h"
 #include "telemetry_engine.h"
 #include "deac_config.h"
+#include "evidence_graph.h"
+#include "process_identity.h"
 #include <filesystem>
 #include <cassert>
 #include <iostream>
@@ -47,6 +49,32 @@ int main() {
     assert(loaded.review_threshold <= loaded.enforce_threshold);
     std::filesystem::remove(configPath);
 
-    std::cout << "DEAC detection/policy/config tests passed\n";
+
+    {
+        using namespace deac;
+        identity::ProcessIdentity cs2{100, 10001, "cs2.exe"};
+        identity::ProcessIdentity helper{200, 20002, "helper.exe"};
+        identity::ProcessIdentity reused{200, 20003, "helper.exe"};
+        graph::EvidenceGraph graph(10000, 128);
+
+        graph.observe({1000, 1, graph::EventKind::DangerousHandle, cs2, helper, "handle", 0.25f, 0.35f});
+        graph.observe({1100, 2, graph::EventKind::ImageLoaded, cs2, {}, "unsigned-module", 0.92f, 0.90f});
+        auto corr = graph.correlate(helper, cs2, graph::EventKind::ImageLoaded, 1101);
+        assert(corr.same_target_instance);
+        assert(corr.same_source_instance);
+        assert(corr.handle_before_module);
+        assert(corr.boost >= 0.30f);
+
+        graph.observe({1200, 3, graph::EventKind::MemoryPrivateExecutablePe, cs2, helper, "0x1234", 0.90f, 0.94f});
+        corr = graph.correlate(helper, cs2, graph::EventKind::MemoryPrivateExecutablePe, 1201);
+        assert(corr.handle_before_memory);
+        assert(corr.module_before_memory);
+
+        // PID reuse must not correlate with the previous process instance.
+        corr = graph.correlate(reused, cs2, graph::EventKind::ImageLoaded, 1202);
+        assert(!corr.same_source_instance);
+    }
+
+    std::cout << "DEAC detection/policy/config/graph tests passed\n";
     return 0;
 }

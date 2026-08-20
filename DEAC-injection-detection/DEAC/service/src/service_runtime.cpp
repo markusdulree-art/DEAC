@@ -1,11 +1,14 @@
 #include "service_runtime.h"
 #include "driver_client.h"
 #include "deac_detection.h"
+#include "evidence_graph.h"
+#include "process_identity.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <string>
 #include <unordered_map>
 #include <Windows.h>
 
@@ -42,8 +45,27 @@ bool IsCs2(std::uint64_t pid) {
     return _wcsicmp(name.c_str(), L"cs2.exe") == 0;
 }
 
-const char* ModuleVerdictName(deac::modules::Verdict verdict) {
-    return deac::modules::ToString(verdict);
+const char* DecisionName(deac::policy::Decision decision) {
+    switch (decision) {
+        case deac::policy::Decision::Monitor: return "Monitor";
+        case deac::policy::Decision::Review: return "Review";
+        case deac::policy::Decision::Enforce: return "Enforce";
+        default: return "Allow";
+    }
+}
+
+deac::graph::EventKind ToGraphKind(deac::protocol::EventType type) {
+    using deac::graph::EventKind;
+    using deac::protocol::EventType;
+    switch (type) {
+        case EventType::ProcessCreated: return EventKind::ProcessCreated;
+        case EventType::ProcessExited: return EventKind::ProcessExited;
+        case EventType::ImageLoaded: return EventKind::ImageLoaded;
+        case EventType::ProtectedHandleAttempt: return EventKind::DangerousHandle;
+        case EventType::MemoryAnomaly: return EventKind::MemoryPrivateExecutable;
+        case EventType::QueueOverflow: return EventKind::QueueOverflow;
+        default: return EventKind::Unknown;
+    }
 }
 } // namespace
 
@@ -53,7 +75,8 @@ Runtime::Runtime()
     : settings_(config::Defaults()),
       policy_engine_(policy::Config{}),
       evidence_(ProgramDataRoot() / L"evidence.csv"),
-      audit_(ProgramDataRoot() / L"audit.jsonl") {}
+      audit_(ProgramDataRoot() / L"audit.jsonl"),
+      graph_(10'000, 4096) {}
 
 Runtime::~Runtime() { stop(); }
 
@@ -80,10 +103,14 @@ bool Runtime::start() {
     }
 
     if (const auto status = probe.status()) {
+        driver_flags_.store(status->flags, std::memory_order_release);
+        driver_dropped_.store(status->queue_dropped, std::memory_order_release);
         std::cout << "DEAC: platform level=" << status->platform.level
                   << " secure_boot=" << static_cast<int>(status->platform.secure_boot)
                   << " vbs=" << static_cast<int>(status->platform.vbs_enabled)
-                  << " hvci=" << static_cast<int>(status->platform.hvci_enabled) << '\n';
+                  << " hvci=" << static_cast<int>(status->platform.hvci_enabled)
+                  << " capabilities=0x" << std::hex << status->flags
+                  << " dropped=" << std::dec << status->queue_dropped << '\n';
         audit_.write("platform", status->platform.level >= static_cast<std::uint32_t>(protocol::PlatformLevel::Baseline)
             ? "baseline-or-better" : "degraded");
     } else {
@@ -114,22 +141,40 @@ void Runtime::eventLoop() {
 
     LARGE_INTEGER frequency{};
     QueryPerformanceFrequency(&frequency);
-    std::unordered_map<std::uint64_t, std::uint64_t> recent_handle_sources;
     std::uint64_t last_inventory_refresh_ms = 0;
     std::uint64_t last_memory_scan_ms = 0;
-    std::unordered_map<std::uintptr_t, std::uint64_t> recent_private_pe_regions;
+    std::uint64_t last_status_poll_ms = 0;
+    std::uint64_t last_sequence = 0;
+    std::uint64_t last_dropped = driver_dropped_.load(std::memory_order_acquire);
+    std::unordered_map<std::uintptr_t, std::uint64_t> recent_private_regions;
 
     while (!stopping_.load(std::memory_order_acquire)) {
         const auto event = driver.nextEvent();
-        if (!event) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(settings_.telemetry_poll_ms));
-            continue;
+        const auto now_ms = GetTickCount64();
+
+        if (now_ms - last_status_poll_ms >= 2000) {
+            last_status_poll_ms = now_ms;
+            if (const auto status = driver.status()) {
+                driver_flags_.store(status->flags, std::memory_order_release);
+                if (status->queue_dropped > last_dropped) {
+                    policy::Evidence loss{};
+                    loss.timestamp_ms = now_ms;
+                    loss.event_type = static_cast<std::uint32_t>(protocol::EventType::QueueOverflow);
+                    loss.anomaly = 0.0f;
+                    loss.data_quality = 0.0f;
+                    loss.evidence_key = "telemetry_loss";
+                    loss.correlation_edges = 0;
+                    policy_engine_.add(loss);
+                    (void)evidence_.append(loss);
+                    audit_.write("telemetry", "kernel event queue loss detected");
+                    last_dropped = status->queue_dropped;
+                }
+            }
         }
 
-        const auto now_ms = GetTickCount64();
-        const auto tracked_cs2 = cs2_pid_.load(std::memory_order_acquire);
-        if (tracked_cs2 != 0 && (last_inventory_refresh_ms == 0 || now_ms - last_inventory_refresh_ms >= 10000)) {
-            const auto snapshot = module_inventory_.Refresh(tracked_cs2);
+        const auto tracked_pid = cs2_pid_.load(std::memory_order_acquire);
+        if (tracked_pid != 0 && now_ms - last_inventory_refresh_ms >= 10000) {
+            const auto snapshot = module_inventory_.Refresh(tracked_pid);
             last_inventory_refresh_ms = now_ms;
             for (const auto& module : snapshot) {
                 if (module.verdict == modules::Verdict::Suspicious) {
@@ -139,69 +184,132 @@ void Runtime::eventLoop() {
                 }
             }
         }
-        if (tracked_cs2 != 0 && (last_memory_scan_ms == 0 || now_ms - last_memory_scan_ms >= 2000)) {
+
+        if (tracked_pid != 0 && now_ms - last_memory_scan_ms >= 2000) {
             last_memory_scan_ms = now_ms;
-            const auto regions = module_inventory_.ScanExecutablePrivateRegions(tracked_cs2);
+            identity::ProcessIdentity target{};
+            if (!identity_tracker_.get(tracked_pid, target)) target = identity_tracker_.observe(tracked_pid);
+            const auto regions = module_inventory_.ScanExecutablePrivateRegions(tracked_pid);
             for (const auto& region : regions) {
                 if (!region.pe_header && !region.writable) continue;
-                const bool fresh = recent_private_pe_regions.emplace(region.base, now_ms).second;
-                if (!fresh) continue;
+                if (!recent_private_regions.emplace(region.base, now_ms).second) continue;
 
-                policy::Evidence memory_evidence{};
-                memory_evidence.timestamp_ms = now_ms;
-                memory_evidence.event_type = static_cast<std::uint32_t>(protocol::EventType::MemoryAnomaly);
-                memory_evidence.pid = tracked_cs2;
-                memory_evidence.anomaly = region.anomaly;
-                memory_evidence.data_quality = region.pe_header ? 0.94f : 0.55f;
+                const auto kind = region.pe_header ? graph::EventKind::MemoryPrivateExecutablePe
+                                                   : graph::EventKind::MemoryPrivateExecutable;
+                graph_.observe(graph::Event{now_ms, 0, kind, target, {},
+                                            std::to_string(region.base), region.anomaly,
+                                            region.pe_header ? 0.94f : 0.55f});
 
-                bool correlated = false;
-                for (auto it = recent_handle_sources.begin(); it != recent_handle_sources.end();) {
-                    if (now_ms > it->second && now_ms - it->second > 5000) {
-                        it = recent_handle_sources.erase(it);
-                        continue;
+                policy::Evidence memory{};
+                memory.timestamp_ms = now_ms;
+                memory.event_type = static_cast<std::uint32_t>(protocol::EventType::MemoryAnomaly);
+                memory.pid = tracked_pid;
+                memory.anomaly = region.anomaly;
+                memory.data_quality = region.pe_header ? 0.94f : 0.55f;
+                memory.evidence_key = region.pe_header ? "private_pe" : "private_executable";
+
+                const auto sources = graph_.recent_sources(target, graph::EventKind::DangerousHandle, now_ms);
+                for (const auto& source : sources) {
+                    const auto corr = graph_.correlate(source, target, kind, now_ms);
+                    if (corr.handle_before_memory) {
+                        memory.source_pid = source.pid;
+                        memory.source_birth_token = source.birth_token;
+                        memory.correlation_edges = corr.supporting_edges;
+                        memory.correlation_boost = corr.boost;
+                        memory.anomaly = std::max(memory.anomaly, 0.995f);
+                        memory.data_quality = std::max(memory.data_quality, 0.99f);
+                        audit_.write("correlation", "same-process-instance dangerous handle precedes executable private memory");
+                        break;
                     }
-                    correlated = true;
-                    ++it;
                 }
-                if (correlated && region.pe_header) {
-                    memory_evidence.anomaly = 0.995f;
-                    memory_evidence.data_quality = 0.99f;
-                    audit_.write("correlation", "private executable PE region correlated with recent dangerous CS2 handle observation");
-                } else {
-                    audit_.write("memory", std::string("suspicious executable private region reason=") +
-                        (region.reason ? region.reason : "unknown") +
-                        " base=0x" + std::to_string(region.base));
-                }
-                policy_engine_.add(memory_evidence);
-                (void)evidence_.append(memory_evidence);
+
+                policy_engine_.add(memory);
+                (void)evidence_.append(memory);
             }
-            // Keep the correlation cache bounded.
-            for (auto it = recent_private_pe_regions.begin(); it != recent_private_pe_regions.end();) {
-                if (now_ms > it->second && now_ms - it->second > 30000) it = recent_private_pe_regions.erase(it);
+            for (auto it = recent_private_regions.begin(); it != recent_private_regions.end();) {
+                if (now_ms > it->second && now_ms - it->second > 30000) it = recent_private_regions.erase(it);
                 else ++it;
             }
         }
 
-        const auto type = static_cast<protocol::EventType>(event->type);
+        if (!event) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings_.telemetry_poll_ms));
+            continue;
+        }
 
-        // Track the actual CS2 process. We do not assume that PID 1 or a hard-coded
-        // process ID represents the game; process identity is established from its image.
+        if (last_sequence != 0 && event->sequence > last_sequence + 1) {
+            policy::Evidence gap{};
+            gap.timestamp_ms = QpcToMs(event->timestamp_qpc, frequency.QuadPart);
+            gap.sequence = event->sequence;
+            gap.event_type = static_cast<std::uint32_t>(protocol::EventType::QueueOverflow);
+            gap.anomaly = 0.0f;
+            gap.data_quality = 0.0f;
+            gap.evidence_key = "sequence_gap";
+            policy_engine_.add(gap);
+            (void)evidence_.append(gap);
+            audit_.write("telemetry", "kernel event sequence gap detected");
+        }
+        last_sequence = event->sequence;
+
+        const auto type = static_cast<protocol::EventType>(event->type);
+        identity::ProcessIdentity target{};
+        if (type == protocol::EventType::ProcessExited) {
+            identity_tracker_.get(event->pid, target);
+        } else {
+            target = identity_tracker_.observe(event->pid);
+        }
+
         if (type == protocol::EventType::ProcessCreated && IsCs2(event->pid)) {
             cs2_pid_.store(event->pid, std::memory_order_release);
+            cs2_identity_ = identity_tracker_.observe(event->pid);
+            module_inventory_.AttachToProcess(event->pid);
             const auto snapshot = module_inventory_.Refresh(event->pid);
-            audit_.write("cs2", "process discovered; initial module inventory captured");
+            audit_.write("cs2", "process discovered; stable process identity established");
             for (const auto& module : snapshot) {
+                graph_.observe(graph::Event{now_ms, event->sequence, graph::EventKind::ImageLoaded,
+                                            cs2_identity_, {}, module.sha256, module.anomaly,
+                                            module.verdict == modules::Verdict::Suspicious ? 0.9f : 0.0f});
                 if (module.verdict != modules::Verdict::Trusted) {
-                    audit_.write("module", std::string("initial module ") + ModuleVerdictName(module.verdict) +
+                    audit_.write("module", std::string("initial module ") + modules::ToString(module.verdict) +
                         " provenance=" + modules::ToString(module.provenance) +
-                        " path=" + module.path.string() +
-                        " sha256=" + module.sha256);
+                        " path=" + module.path.string() + " sha256=" + module.sha256);
                 }
             }
-        } else if (type == protocol::EventType::ProcessExited &&
-                   event->pid == cs2_pid_.load(std::memory_order_acquire)) {
+        }
+
+        if (type == protocol::EventType::ProcessExited && event->pid == cs2_pid_.load(std::memory_order_acquire)) {
+            graph_.observe(graph::Event{now_ms, event->sequence, graph::EventKind::ProcessExited,
+                                        cs2_identity_, {}, {}, 0.0f, 1.0f});
             cs2_pid_.store(0, std::memory_order_release);
-            audit_.write("cs2", "process exited; module inventory retained for evidence");
+            identity_tracker_.remove(event->pid);
+            audit_.write("cs2", "process exited; evidence graph retained for current session");
+            continue;
+        }
+
+        if (target.valid()) {
+            const auto kind = ToGraphKind(type);
+            identity::ProcessIdentity source{};
+            if (type == protocol::EventType::ProtectedHandleAttempt && event->payload_size >= sizeof(protocol::HandlePayload)) {
+                const auto* payload = reinterpret_cast<const protocol::HandlePayload*>(event->payload);
+                source = identity_tracker_.observe(payload->source_pid);
+                const auto access = payload->desired_access;
+                const bool dangerous = (access & (PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+                                                  PROCESS_CREATE_THREAD | PROCESS_DUP_HANDLE)) != 0;
+                const bool read = (access & PROCESS_VM_READ) != 0;
+                if (event->pid == cs2_pid_.load(std::memory_order_acquire)) {
+                    graph_.observe(graph::Event{now_ms, event->sequence,
+                                                dangerous ? graph::EventKind::DangerousHandle : graph::EventKind::ReadHandle,
+                                                target, source, {}, dangerous ? 0.25f : 0.08f,
+                                                dangerous ? 0.35f : 0.12f});
+                }
+            } else if (type == protocol::EventType::ImageLoaded && event->pid == cs2_pid_.load(std::memory_order_acquire)) {
+                const auto module = module_inventory_.ObserveImageLoad(*event);
+                graph_.observe(graph::Event{now_ms, event->sequence, graph::EventKind::ImageLoaded,
+                                            target, {}, module.sha256, module.anomaly,
+                                            module.verdict == modules::Verdict::Suspicious ? 0.90f : 0.0f});
+            } else if (type == protocol::EventType::ProcessCreated) {
+                graph_.observe(graph::Event{now_ms, event->sequence, kind, target, {}, {}, 0.0f, 0.05f});
+            }
         }
 
         policy::Evidence evidence{};
@@ -211,71 +319,53 @@ void Runtime::eventLoop() {
         evidence.pid = event->pid;
         evidence.tid = event->tid;
 
-        if (type == protocol::EventType::QueueOverflow) {
-            evidence.data_quality = 0.0f;
-            evidence.anomaly = 0.0f;
-            audit_.write("event", "kernel queue overflow reported");
-        } else if (type == protocol::EventType::Heartbeat || type == protocol::EventType::PlatformState) {
-            evidence.data_quality = 0.0f;
-        } else if (type == protocol::EventType::ProtectedHandleAttempt &&
-                   event->pid == cs2_pid_.load(std::memory_order_acquire) &&
-                   event->payload_size >= sizeof(protocol::HandlePayload)) {
+        if (type == protocol::EventType::ProtectedHandleAttempt &&
+            event->pid == cs2_pid_.load(std::memory_order_acquire) &&
+            event->payload_size >= sizeof(protocol::HandlePayload)) {
             const auto* payload = reinterpret_cast<const protocol::HandlePayload*>(event->payload);
             const auto access = payload->desired_access;
             const bool dangerous = (access & (PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
                                               PROCESS_CREATE_THREAD | PROCESS_DUP_HANDLE)) != 0;
-            const bool memory_read = (access & PROCESS_VM_READ) != 0;
+            const bool read = (access & PROCESS_VM_READ) != 0;
+            evidence.source_pid = payload->source_pid;
             if (dangerous) {
-                recent_handle_sources[payload->source_pid] = now_ms;
-                evidence.data_quality = 0.35f;
                 evidence.anomaly = 0.25f;
-                audit_.write("handle", "CS2 dangerous handle observation source=" + std::to_string(payload->source_pid));
-            } else if (memory_read) {
-                // VM_READ is intentionally a low-weight observation because legitimate
-                // diagnostics, capture tools and overlays can request it.
-                evidence.data_quality = 0.12f;
+                evidence.data_quality = 0.35f;
+                evidence.evidence_key = "dangerous_handle";
+                audit_.write("handle", "CS2 dangerous handle source=" + std::to_string(payload->source_pid));
+            } else if (read) {
                 evidence.anomaly = 0.08f;
-                audit_.write("handle", "CS2 read-handle observation source=" + std::to_string(payload->source_pid));
-            } else {
-                evidence.data_quality = 0.05f;
-                evidence.anomaly = 0.0f;
+                evidence.data_quality = 0.12f;
+                evidence.evidence_key = "read_handle";
             }
         } else if (type == protocol::EventType::ImageLoaded &&
                    event->pid == cs2_pid_.load(std::memory_order_acquire)) {
             const auto module = module_inventory_.ObserveImageLoad(*event);
             if (module.verdict == modules::Verdict::Suspicious) {
-                evidence.data_quality = 0.90f;
                 evidence.anomaly = module.anomaly;
-                audit_.write("module", std::string("suspicious load provenance=") +
-                    modules::ToString(module.provenance) + " path=" + module.path.string() +
-                    " sha256=" + module.sha256 + " publisher=" + module.publisher);
-
-                // Correlate a suspicious module load with a recent dangerous handle open.
-                // This is intentionally stronger than either observation alone.
-                bool correlated = false;
-                for (auto it = recent_handle_sources.begin(); it != recent_handle_sources.end();) {
-                    if (now_ms > it->second && now_ms - it->second > 5000) {
-                        it = recent_handle_sources.erase(it);
-                        continue;
+                evidence.data_quality = 0.90f;
+                evidence.evidence_key = "suspicious_module:" + module.sha256;
+                const auto sources = graph_.recent_sources(cs2_identity_, graph::EventKind::DangerousHandle, now_ms);
+                for (const auto& source : sources) {
+                    const auto corr = graph_.correlate(source, cs2_identity_, graph::EventKind::ImageLoaded, now_ms);
+                    if (corr.handle_before_module) {
+                        evidence.source_pid = source.pid;
+                        evidence.source_birth_token = source.birth_token;
+                        evidence.correlation_edges = corr.supporting_edges;
+                        evidence.correlation_boost = corr.boost;
+                        evidence.anomaly = std::max(evidence.anomaly, 0.98f);
+                        evidence.data_quality = std::max(evidence.data_quality, 0.98f);
+                        audit_.write("correlation", "same-process-instance handle precedes suspicious module state");
+                        break;
                     }
-                    correlated = true;
-                    ++it;
                 }
-                if (correlated) {
-                    evidence.anomaly = std::max(evidence.anomaly, 0.98f);
-                    evidence.data_quality = 0.98f;
-                    audit_.write("correlation", "suspicious CS2 module load correlated with recent dangerous handle observation");
-                }
-            } else {
-                // Official Valve/Microsoft/Steam modules are explicitly treated as trusted;
-                // signed third-party modules remain observable but do not become cheat evidence.
-                evidence.data_quality = 0.0f;
-                evidence.anomaly = 0.0f;
+                audit_.write("module", std::string("suspicious module path=") + module.path.string() +
+                    " sha256=" + module.sha256 + " publisher=" + module.publisher);
             }
-        } else if (type == protocol::EventType::ThreadCreated || type == protocol::EventType::ThreadExited ||
-                   type == protocol::EventType::ProcessCreated || type == protocol::EventType::ProcessExited) {
-            evidence.data_quality = 0.05f;
+        } else if (type == protocol::EventType::QueueOverflow) {
             evidence.anomaly = 0.0f;
+            evidence.data_quality = 0.0f;
+            evidence.evidence_key = "queue_overflow_event";
         }
 
         if (evidence.data_quality > 0.0f) {
@@ -295,6 +385,7 @@ void Runtime::telemetryLoop() {
             evidence.anomaly = score.anomaly;
             evidence.data_quality = score.data_quality;
             evidence.event_type = static_cast<std::uint32_t>(protocol::EventType::DriverState);
+            evidence.evidence_key = "behavioral_aggregate";
             policy_engine_.add(evidence);
             (void)evidence_.append(evidence);
         }
@@ -307,14 +398,9 @@ void Runtime::decisionLoop() {
     while (!stopping_.load(std::memory_order_acquire)) {
         const auto result = policy_engine_.evaluate();
         if (result.decision != previous) {
-            const char* name = "Allow";
-            switch (result.decision) {
-                case policy::Decision::Monitor: name = "Monitor"; break;
-                case policy::Decision::Review: name = "Review"; break;
-                case policy::Decision::Enforce: name = "Enforce"; break;
-                default: break;
-            }
-            audit_.write("decision", name);
+            audit_.write("decision", std::string(DecisionName(result.decision)) +
+                " confidence=" + std::to_string(result.confidence) +
+                " supporting=" + std::to_string(result.supporting_events));
             previous = result.decision;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(500));

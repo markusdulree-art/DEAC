@@ -10,6 +10,7 @@ PVOID g_ob_registration = nullptr;
 BOOLEAN g_process_registered = FALSE;
 BOOLEAN g_thread_registered = FALSE;
 BOOLEAN g_image_registered = FALSE;
+ULONG g_capability_flags = 0;
 
 VOID FillBaseEvent(deac::protocol::Event* event, deac::protocol::EventType type, HANDLE pid, HANDLE tid) {
     RtlZeroMemory(event, sizeof(*event));
@@ -90,14 +91,17 @@ NTSTATUS DeacRegisterCallbacks() {
         PsCreateProcessNotifySubsystems, reinterpret_cast<PVOID>(ProcessNotify), FALSE);
     if (!NT_SUCCESS(status)) return status;
     g_process_registered = TRUE;
+    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::ProcessCallbacks);
 
     status = PsSetCreateThreadNotifyRoutineEx(PsCreateThreadNotifyNonSystem, reinterpret_cast<PVOID>(ThreadNotify));
     if (!NT_SUCCESS(status)) { DeacUnregisterCallbacks(); return status; }
     g_thread_registered = TRUE;
+    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::ThreadCallbacks);
 
     status = PsSetLoadImageNotifyRoutine(ImageNotify);
     if (!NT_SUCCESS(status)) { DeacUnregisterCallbacks(); return status; }
     g_image_registered = TRUE;
+    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::ImageCallbacks);
 
     UNICODE_STRING altitude = RTL_CONSTANT_STRING(L"370720");
     OB_OPERATION_REGISTRATION operation{};
@@ -115,10 +119,14 @@ NTSTATUS DeacRegisterCallbacks() {
     status = ObRegisterCallbacks(&registration, &g_ob_registration);
     if (!NT_SUCCESS(status)) {
         g_ob_registration = nullptr;
-        // Observation is optional; retain the process/thread/image event stream.
+    } else {
+        g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::HandleCallbacks);
     }
+    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::QueueHealthy);
     return STATUS_SUCCESS;
 }
+
+ULONG DeacCallbackCapabilityFlags() { return g_capability_flags; }
 
 VOID DeacUnregisterCallbacks() {
     if (g_ob_registration) {
@@ -137,4 +145,5 @@ VOID DeacUnregisterCallbacks() {
         PsSetCreateProcessNotifyRoutineEx2(PsCreateProcessNotifySubsystems, reinterpret_cast<PVOID>(ProcessNotify), TRUE);
         g_process_registered = FALSE;
     }
+    g_capability_flags = 0;
 }

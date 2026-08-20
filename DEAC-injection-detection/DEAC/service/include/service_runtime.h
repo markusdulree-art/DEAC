@@ -9,6 +9,8 @@
 #include "evidence_store.h"
 #include "telemetry_engine.h"
 #include "module_inventory.h"
+#include "evidence_graph.h"
+#include "process_identity.h"
 
 namespace deac::service {
 
@@ -37,7 +39,12 @@ private:
     evidence::Store evidence_;
     audit::Log audit_;
     modules::Inventory module_inventory_;
+    identity::Tracker identity_tracker_;
+    graph::EvidenceGraph graph_;
+    identity::ProcessIdentity cs2_identity_{};
     std::atomic<std::uint64_t> cs2_pid_{0};
+    std::atomic<std::uint32_t> driver_flags_{0};
+    std::atomic<std::uint64_t> driver_dropped_{0};
 };
 
 } // namespace deac::service

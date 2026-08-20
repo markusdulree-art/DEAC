@@ -1,5 +1,6 @@
 #include "evidence_store.h"
 #include <iomanip>
+#include <utility>
 
 namespace deac::evidence {
 
@@ -18,7 +19,12 @@ bool Store::append(const policy::Evidence& evidence) {
          << evidence.data_quality << ','
          << evidence.event_type << ','
          << evidence.pid << ','
-         << evidence.tid << '\n';
+         << evidence.tid << ','
+         << evidence.source_pid << ','
+         << evidence.source_birth_token << ','
+         << evidence.correlation_edges << ','
+         << std::setprecision(7) << evidence.correlation_boost << ','
+         << evidence.evidence_key << '\n';
     out_.flush();
     if (out_) { ++records_; return true; }
     return false;

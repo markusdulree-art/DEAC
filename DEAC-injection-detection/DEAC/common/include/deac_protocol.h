@@ -4,7 +4,7 @@
 
 namespace deac::protocol {
 
-inline constexpr std::uint32_t kProtocolVersion = 3;
+inline constexpr std::uint32_t kProtocolVersion = 4;
 inline constexpr std::uint32_t kMaxEventPayload = 512;
 
 using ProcessId = std::uint64_t;
@@ -23,6 +23,14 @@ enum class EventType : std::uint32_t {
     DriverState = 9,
     QueueOverflow = 10,
     MemoryAnomaly = 11,
+};
+
+enum class DriverCapability : std::uint32_t {
+    ProcessCallbacks = 1u << 0,
+    ThreadCallbacks = 1u << 1,
+    ImageCallbacks = 1u << 2,
+    HandleCallbacks = 1u << 3,
+    QueueHealthy = 1u << 4,
 };
 
 enum class PlatformLevel : std::uint32_t {
@@ -91,6 +99,7 @@ struct DriverStatus final {
     std::uint32_t state;
     std::uint32_t flags;
     std::uint64_t uptime_ms;
+    std::uint64_t queue_dropped;
     PlatformSecurityState platform;
 };
 
