@@ -1,4 +1,0 @@
-/mnt/data/deac_work/DEAC/build/CMakeFiles/deac_tests.dir
-/mnt/data/deac_work/DEAC/build/CMakeFiles/test.dir
-/mnt/data/deac_work/DEAC/build/CMakeFiles/edit_cache.dir
-/mnt/data/deac_work/DEAC/build/CMakeFiles/rebuild_cache.dir
