@@ -1,0 +1,12 @@
+{
+  "telemetry_port": 30080,
+  "telemetry_max_body_bytes": 65536,
+  "telemetry_poll_ms": 50,
+  "heartbeat_timeout_ms": 5000,
+  "evidence_flush_ms": 1000,
+  "minimum_supporting_events": 3,
+  "monitor_threshold": 0.70,
+  "review_threshold": 0.82,
+  "enforce_threshold": 0.93,
+  "enable_local_http": true
+}
