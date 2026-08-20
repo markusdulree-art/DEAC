@@ -1,0 +1,10 @@
+TARGETNAME=deac_driver
+TARGETTYPE=DRIVER
+KMDF_VERSION_MAJOR=1
+SOURCES=src\driver.cpp \
+        src\platform_security.cpp \
+        src\callbacks.cpp \
+        src\event_queue.cpp \
+        src\heartbeat.cpp \
+        src\device.cpp
+INCLUDES=$(PROJECT_DIR)\include;$(PROJECT_DIR)..\common\include
