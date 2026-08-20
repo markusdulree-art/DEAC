@@ -27,6 +27,7 @@ bool Log::write(const Record& r) {
         std::chrono::system_clock::now().time_since_epoch()).count();
 
     json record = {
+        {"schema", 2},
         {"wall_time_ms", wall},
         {"monotonic_ms", r.monotonic_ms},
         {"sequence", r.sequence},

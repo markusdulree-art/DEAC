@@ -16,6 +16,7 @@ bool Store::append(const policy::Evidence& e) {
     if (!out_.is_open()) return false;
 
     const json record = {
+        {"schema", 2},
         {"timestamp_ms", e.timestamp_ms},
         {"sequence", e.sequence},
         {"event_type", e.event_type},
@@ -31,7 +32,9 @@ bool Store::append(const policy::Evidence& e) {
         {"correlation_boost", e.correlation_boost},
         {"evidence_key", e.evidence_key},
         {"evidence_family", e.evidence_family},
-        {"correlation_id", e.correlation_id}
+        {"correlation_id", e.correlation_id},
+        {"target_identity", e.target.Key()},
+        {"source_identity", e.source.Key()}
     };
 
     out_ << record.dump() << '\n';

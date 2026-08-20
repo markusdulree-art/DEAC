@@ -40,6 +40,8 @@ struct Result final {
     float confidence{};
     std::uint32_t supporting_events{};
     std::uint32_t supporting_families{};
+    std::uint32_t correlated_events{};
+    float telemetry_integrity{1.0f};
     std::uint32_t integrity_flags{};
 };
 

@@ -157,3 +157,15 @@ This iteration applies the next set of security-engineering fixes on top of the 
 - Update protocol compatibility tracks `kProtocolVersion` rather than a stale constant.
 
 The portable test target is intentionally built without Windows-only configuration code on non-Windows hosts; the Windows service target continues to include the full configuration implementation.
+
+
+## Evidence fusion hardening
+
+The policy engine now fuses evidence by independent family rather than treating every observation as an independent vote.
+Repeated observations sharing the same evidence key receive diminishing returns. Correlation edges provide contextual reinforcement
+only when an event-specific temporal relationship exists. Telemetry loss degrades confidence rather than disappearing silently.
+
+## Signer trust policy
+
+A valid Authenticode signature alone is not treated as authoritative trust. Configure explicit certificate thumbprints in
+`trusted_signer_thumbprints` when a signer is part of the trusted product policy. The default policy remains observable/conservative.

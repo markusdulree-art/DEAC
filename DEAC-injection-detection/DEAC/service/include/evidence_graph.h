@@ -39,6 +39,7 @@ struct Correlation final {
     bool handle_before_memory{};
     bool handle_before_module{};
     bool module_before_memory{};
+    bool relationship_valid{};
     std::uint32_t supporting_edges{};
     float boost{};
 };

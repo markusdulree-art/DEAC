@@ -4,7 +4,12 @@
 namespace deac::graph {
 
 EvidenceGraph::EvidenceGraph(TimingConfig timing, std::size_t capacity)
-    : timing_(timing), capacity_(std::max<std::size_t>(64, capacity)) {}
+    : timing_(timing), capacity_(std::max<std::size_t>(64, capacity)) {
+    timing_.handle_to_module_ms = std::clamp<std::uint64_t>(timing_.handle_to_module_ms, 1, 5000);
+    timing_.handle_to_memory_ms = std::clamp<std::uint64_t>(timing_.handle_to_memory_ms, 1, 5000);
+    timing_.module_to_memory_ms = std::clamp<std::uint64_t>(timing_.module_to_memory_ms, 1, 10000);
+    timing_.generic_ms = std::clamp<std::uint64_t>(timing_.generic_ms, 1, 30000);
+}
 
 bool EvidenceGraph::sameProcess(const identity::ProcessIdentity& a,
                                 const identity::ProcessIdentity& b) noexcept {
@@ -91,7 +96,15 @@ Correlation EvidenceGraph::correlate(const identity::ProcessIdentity& source,
         }
     }
 
-    result.boost = EdgeBoost(result);
+    result.relationship_valid = result.supporting_edges > 0;
+    // A mere shared target/source is context, not a causal relationship. Only an
+    // event-specific edge is allowed to contribute correlation strength.
+    if (!result.relationship_valid) {
+        result.temporal_proximity = false;
+        result.boost = 0.0f;
+    } else {
+        result.boost = EdgeBoost(result);
+    }
     return result;
 }
 

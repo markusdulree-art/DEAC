@@ -72,6 +72,9 @@ class Inventory final {
 public:
     Inventory() = default;
 
+    // Trusted signer identities are cryptographic certificate thumbprints, not display-name strings.
+    void SetTrustedSignerThumbprints(std::vector<std::string> thumbprints);
+
     // Establishes the CS2 executable root and performs an initial module snapshot.
     bool AttachToProcess(std::uint64_t pid);
 
@@ -100,6 +103,7 @@ private:
     std::unordered_map<std::string, ModuleAssessment> modules_;
     std::unordered_set<std::string> baseline_hashes_;
     bool baseline_established_{false};
+    std::unordered_set<std::string> trusted_signer_thumbprints_;
 };
 
 const char* ToString(Provenance value) noexcept;

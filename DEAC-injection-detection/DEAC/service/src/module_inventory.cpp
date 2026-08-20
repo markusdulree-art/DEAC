@@ -162,6 +162,18 @@ std::filesystem::path Inventory::Normalize(const std::filesystem::path& path) {
     return ec ? absolute.lexically_normal() : canonical;
 }
 
+void Inventory::SetTrustedSignerThumbprints(std::vector<std::string> thumbprints) {
+    std::unordered_set<std::string> normalized;
+    for (auto& value : thumbprints) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        if (value.size() == 40 || value.size() == 64) normalized.insert(value);
+    }
+    std::lock_guard lock(mutex_);
+    trusted_signer_thumbprints_ = std::move(normalized);
+}
+
 bool Inventory::AttachToProcess(std::uint64_t pid) {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
     if (!process) return false;
@@ -232,24 +244,25 @@ ModuleAssessment Inventory::Assess(std::uint64_t pid, const std::filesystem::pat
         result.provenance = Provenance::MicrosoftSigned;
         result.verdict = Verdict::Trusted;
         result.anomaly = 0.01f;
-    } else if (under_game && publisher_lower.find("valve") != std::string::npos) {
-        result.provenance = Provenance::ValveSigned;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = 0.01f;
-    } else if (under_game && publisher_lower.find("steam") != std::string::npos) {
-        result.provenance = Provenance::SteamSigned;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = 0.01f;
-    } else if (under_game && publisher_lower.find("microsoft") != std::string::npos) {
-        result.provenance = Provenance::MicrosoftSigned;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = 0.01f;
     } else if (signed_valid) {
-        // A valid Authenticode signature is meaningful provenance, but a third-party publisher
-        // is intentionally observable instead of implicitly trusted as game content.
-        result.provenance = Provenance::TrustedThirdPartySigned;
-        result.verdict = Verdict::Observe;
-        result.anomaly = 0.12f;
+        bool trusted_signer = false;
+        {
+            std::scoped_lock lock(mutex_);
+            trusted_signer = !signer_thumbprint.empty() &&
+                trusted_signer_thumbprints_.find(signer_thumbprint) != trusted_signer_thumbprints_.end();
+        }
+        if (trusted_signer) {
+            if (under_game) result.provenance = Provenance::ValveSigned;
+            else if (publisher_lower.find("microsoft") != std::string::npos) result.provenance = Provenance::MicrosoftSigned;
+            else result.provenance = Provenance::TrustedThirdPartySigned;
+            result.verdict = Verdict::Trusted;
+            result.anomaly = 0.01f;
+        } else {
+            // A valid signature without an explicitly trusted signer identity is provenance, not trust.
+            result.provenance = Provenance::TrustedThirdPartySigned;
+            result.verdict = Verdict::Observe;
+            result.anomaly = under_game ? 0.08f : 0.12f;
+        }
     } else {
         result.provenance = Provenance::ExternalUnsigned;
         result.verdict = Verdict::Suspicious;

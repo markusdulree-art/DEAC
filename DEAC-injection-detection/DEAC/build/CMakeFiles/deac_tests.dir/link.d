@@ -6,7 +6,6 @@ deac_tests: \
   CMakeFiles/deac_tests.dir/service/src/telemetry_engine.cpp.o \
   CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o \
   CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.o \
-  CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o \
   CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o \
   CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o \
   /usr/lib/gcc/x86_64-linux-gnu/14/libstdc++.so \
@@ -51,8 +50,6 @@ CMakeFiles/deac_tests.dir/service/src/telemetry_engine.cpp.o:
 CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o:
 
 CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.o:
-
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o:
 
 CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o:
 

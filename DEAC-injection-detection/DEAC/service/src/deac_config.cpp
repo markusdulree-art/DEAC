@@ -48,6 +48,13 @@ Settings Load(const std::filesystem::path& path) {
         if (j.contains("review_threshold")) result.review_threshold = j.at("review_threshold").get<float>();
         if (j.contains("enforce_threshold")) result.enforce_threshold = j.at("enforce_threshold").get<float>();
         if (j.contains("enable_local_http")) result.enable_local_http = j.at("enable_local_http").get<bool>();
+        if (j.contains("trusted_signer_thumbprints") && j.at("trusted_signer_thumbprints").is_array()) {
+            result.trusted_signer_thumbprints.clear();
+            for (const auto& value : j.at("trusted_signer_thumbprints")) {
+                if (value.is_string()) result.trusted_signer_thumbprints.push_back(value.get<std::string>());
+                if (result.trusted_signer_thumbprints.size() >= 64) break;
+            }
+        }
     } catch (...) {
         return Defaults();
     }
@@ -78,7 +85,8 @@ bool Save(const std::filesystem::path& path, const Settings& input) {
             {"monitor_threshold", settings.monitor_threshold},
             {"review_threshold", settings.review_threshold},
             {"enforce_threshold", settings.enforce_threshold},
-            {"enable_local_http", settings.enable_local_http}
+            {"enable_local_http", settings.enable_local_http},
+            {"trusted_signer_thumbprints", settings.trusted_signer_thumbprints}
         };
         output << j.dump(2) << '\n';
         if (!output) return false;

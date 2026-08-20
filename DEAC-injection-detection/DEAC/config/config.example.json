@@ -9,5 +9,6 @@
   "monitor_threshold": 0.70,
   "review_threshold": 0.82,
   "enforce_threshold": 0.93,
-  "enable_local_http": true
+  "enable_local_http": true,
+  "trusted_signer_thumbprints": []
 }

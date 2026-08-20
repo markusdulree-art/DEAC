@@ -128,24 +128,10 @@ CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/data/deac_work/DEAC/service/src/deac_policy.cpp -o CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.s
 
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o: CMakeFiles/deac_tests.dir/flags.make
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o: /mnt/data/deac_work/DEAC/service/src/deac_config.cpp
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o: CMakeFiles/deac_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o -MF CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o.d -o CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o -c /mnt/data/deac_work/DEAC/service/src/deac_config.cpp
-
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/data/deac_work/DEAC/service/src/deac_config.cpp > CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.i
-
-CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/data/deac_work/DEAC/service/src/deac_config.cpp -o CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.s
-
 CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o: CMakeFiles/deac_tests.dir/flags.make
 CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o: /mnt/data/deac_work/DEAC/service/src/process_identity.cpp
 CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o: CMakeFiles/deac_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o -MF CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o.d -o CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o -c /mnt/data/deac_work/DEAC/service/src/process_identity.cpp
 
 CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.i: cmake_force
@@ -159,7 +145,7 @@ CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.s: cmake_force
 CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o: CMakeFiles/deac_tests.dir/flags.make
 CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o: /mnt/data/deac_work/DEAC/service/src/evidence_graph.cpp
 CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o: CMakeFiles/deac_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o -MF CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o.d -o CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o -c /mnt/data/deac_work/DEAC/service/src/evidence_graph.cpp
 
 CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.i: cmake_force
@@ -176,7 +162,6 @@ deac_tests_OBJECTS = \
 "CMakeFiles/deac_tests.dir/service/src/telemetry_engine.cpp.o" \
 "CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o" \
 "CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.o" \
-"CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o" \
 "CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o" \
 "CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o"
 
@@ -187,13 +172,12 @@ deac_tests: CMakeFiles/deac_tests.dir/tests/test_detection.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/service/src/telemetry_engine.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.o
-deac_tests: CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/service/src/process_identity.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/service/src/evidence_graph.cpp.o
 deac_tests: CMakeFiles/deac_tests.dir/build.make
 deac_tests: CMakeFiles/deac_tests.dir/compiler_depend.ts
 deac_tests: CMakeFiles/deac_tests.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX executable deac_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/data/deac_work/DEAC/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable deac_tests"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/deac_tests.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

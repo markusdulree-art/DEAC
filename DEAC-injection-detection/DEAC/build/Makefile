@@ -139,30 +139,6 @@ deac_tests/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/deac_tests.dir/build.make CMakeFiles/deac_tests.dir/build
 .PHONY : deac_tests/fast
 
-service/src/deac_config.o: service/src/deac_config.cpp.o
-.PHONY : service/src/deac_config.o
-
-# target to build an object file
-service/src/deac_config.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/deac_tests.dir/build.make CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o
-.PHONY : service/src/deac_config.cpp.o
-
-service/src/deac_config.i: service/src/deac_config.cpp.i
-.PHONY : service/src/deac_config.i
-
-# target to preprocess a source file
-service/src/deac_config.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/deac_tests.dir/build.make CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.i
-.PHONY : service/src/deac_config.cpp.i
-
-service/src/deac_config.s: service/src/deac_config.cpp.s
-.PHONY : service/src/deac_config.s
-
-# target to generate assembly for a file
-service/src/deac_config.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/deac_tests.dir/build.make CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.s
-.PHONY : service/src/deac_config.cpp.s
-
 service/src/deac_detection.o: service/src/deac_detection.cpp.o
 .PHONY : service/src/deac_detection.o
 
@@ -317,9 +293,6 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... deac_tests"
-	@echo "... service/src/deac_config.o"
-	@echo "... service/src/deac_config.i"
-	@echo "... service/src/deac_config.s"
 	@echo "... service/src/deac_detection.o"
 	@echo "... service/src/deac_detection.i"
 	@echo "... service/src/deac_detection.s"

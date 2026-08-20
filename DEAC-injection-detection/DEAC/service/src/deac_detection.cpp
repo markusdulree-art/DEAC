@@ -19,9 +19,10 @@ Score Evaluate(const telemetry::Aggregate& a) {
         0.25f * regularity_component +
         0.30f * headshot_component;
 
+    const float sample_depth = std::clamp(static_cast<float>(a.valid_count) / 128.0f, 0.0f, 1.0f);
     result.data_quality = std::clamp(
-        0.60f * a.coverage_ratio +
-        0.40f * (static_cast<float>(a.valid_count) / 500.0f), 0.0f, 1.0f);
+        0.65f * a.coverage_ratio +
+        0.35f * sample_depth, 0.0f, 1.0f);
     result.action_ready = result.data_quality >= 0.8f && result.anomaly >= 0.85f;
     return result;
 }

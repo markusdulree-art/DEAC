@@ -86,6 +86,7 @@ bool Runtime::start() {
 
     const auto root = ProgramDataRoot();
     settings_ = config::Load(root / L"config.json");
+    module_inventory_.SetTrustedSignerThumbprints(settings_.trusted_signer_thumbprints);
 
     policy_engine_.configure(policy::Config{
         settings_.monitor_threshold,
@@ -169,7 +170,7 @@ void Runtime::eventLoop() {
                     (void)evidence_.append(loss);
                     audit::Record rec{};
                     rec.category = "telemetry";
-                    rec.message = "kernel event queue loss detected";
+                    rec.message = "kernel event queue loss detected; telemetry integrity degraded";
                     rec.monotonic_ms = now_ms;
                     rec.evidence_key = loss.evidence_key;
                     rec.session_id = cs2_identity_.Key();

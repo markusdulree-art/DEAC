@@ -51,6 +51,7 @@ int main() {
         const auto a = invalids.aggregate();
         assert(a.received_count == 30);
         assert(a.valid_count == 0);
+        assert(a.invalid_count == 30);
         assert(a.coverage_ratio == 0.0f);
     }
 
@@ -94,6 +95,52 @@ int main() {
         // PID reuse must not correlate with the previous process instance.
         corr = graph.correlate(reused, cs2, graph::EventKind::ImageLoaded, 1202);
         assert(!corr.same_source_instance);
+    }
+
+
+    {
+        // Shared target/source context alone must not create a causal relationship.
+        using namespace deac;
+        identity::ProcessIdentity cs2{101, 10101, "cs2.exe"};
+        identity::ProcessIdentity helper{201, 20101, "helper.exe"};
+        graph::EvidenceGraph graph(deac::graph::TimingConfig{500, 700, 1000, 5000}, 128);
+        graph.observe({1000, 1, graph::EventKind::ProcessCreated, cs2, helper, {}, 0.0f, 0.1f});
+        auto corr = graph.correlate(helper, cs2, graph::EventKind::ImageLoaded, 1100);
+        assert(!corr.relationship_valid);
+        assert(corr.boost == 0.0f);
+        assert(!corr.temporal_proximity);
+    }
+
+    {
+        // Independent evidence families should reinforce nonlinearly, while duplicate keys are discounted.
+        deac::policy::Engine policy({0.70f, 0.82f, 0.93f, 3, 3, 32});
+        const char* families[] = {"module-provenance", "memory-integrity", "handle-integrity"};
+        for (int i = 0; i < 3; ++i) {
+            deac::policy::Evidence e{};
+            e.anomaly = 0.88f;
+            e.data_quality = 0.98f;
+            e.sequence = static_cast<std::uint64_t>(10 + i);
+            e.evidence_key = std::string(families[i]) + ":1";
+            e.evidence_family = families[i];
+            e.correlation_id = "session:independent";
+            e.correlation_edges = 1;
+            e.correlation_boost = 0.55f;
+            policy.add(e);
+        }
+        auto r = policy.evaluate();
+        assert(r.supporting_families == 3);
+        assert(r.correlated_events == 1);
+        assert(r.confidence > 0.93f);
+
+        deac::policy::Evidence duplicate{};
+        duplicate.anomaly = 0.99f;
+        duplicate.data_quality = 1.0f;
+        duplicate.sequence = 20;
+        duplicate.evidence_key = "module-provenance:1";
+        duplicate.evidence_family = "module-provenance";
+        policy.add(duplicate);
+        auto r2 = policy.evaluate();
+        assert(r2.supporting_families == 3);
     }
 
     std::cout << "DEAC detection/policy/config/graph tests passed\n";

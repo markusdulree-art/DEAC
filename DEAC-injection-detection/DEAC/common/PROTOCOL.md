@@ -23,3 +23,22 @@ This boundary is designed to reduce the blast radius of a compromised or buggy u
 ### Protocol v5 notes
 
 `DriverCapability` now separates `QueueOperational` from `QueueLossDetected`. `HandlePayload::granted_access` is zero during pre-operation telemetry because the callback observes requested access before the final handle grant decision; DEAC does not claim post-operation grant state from that event.
+
+
+## v5 evidence semantics
+
+DEAC treats process identity, telemetry completeness, and event relationships as separate signals.
+A shared target/source process does not by itself create a causal correlation edge. Relationship-specific
+time windows are used for handle→module, handle→memory, and module→memory relationships.
+
+`DriverCapability::QueueOperational` describes current ability to service the event queue.
+`DriverCapability::QueueLossDetected` is historical/cumulative loss state; the service also tracks the
+reported drop counter so a single old drop is not misinterpreted as permanent operational failure.
+
+Telemetry aggregates distinguish `received_count`, `valid_count`, and `invalid_count`. Only valid samples
+contribute to feature statistics. Policy fusion uses evidence families with diminishing returns for repeated
+observations from the same family; correlation is contextual reinforcement rather than an independent family.
+
+Signed modules are not implicitly trusted from a display-name publisher string. Production trust policy should
+configure cryptographic signer thumbprints explicitly via `trusted_signer_thumbprints`; otherwise a valid but
+unlisted signature remains observable rather than authoritative trust.

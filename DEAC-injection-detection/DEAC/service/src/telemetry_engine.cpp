@@ -30,6 +30,7 @@ Aggregate AggregateSamples(const Sample* samples, std::size_t count) {
         headshots += std::min(sample.headshots, sample.shots);
     }
 
+    out.invalid_count = out.received_count - out.valid_count;
     out.coverage_ratio = count ? static_cast<float>(out.valid_count) / static_cast<float>(count) : 0.0f;
     if (out.valid_count == 0) return out;
 

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace deac::config {
 
@@ -18,6 +19,7 @@ struct Settings final {
     float review_threshold{0.82f};
     float enforce_threshold{0.93f};
     bool enable_local_http{true};
+    std::vector<std::string> trusted_signer_thumbprints;
 };
 
 Settings Defaults();

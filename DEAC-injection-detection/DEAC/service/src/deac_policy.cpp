@@ -1,6 +1,7 @@
 #include "deac_policy.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace deac::policy {
@@ -11,7 +12,7 @@ void Engine::Sanitize(Config& config) {
     config.enforce_threshold = std::clamp(config.enforce_threshold, config.review_threshold, 1.0f);
     config.minimum_supporting_events = std::max<std::uint32_t>(1, config.minimum_supporting_events);
     config.minimum_supporting_families = std::max<std::uint32_t>(1, config.minimum_supporting_families);
-    config.max_evidence = std::max<std::uint32_t>(8, config.max_evidence);
+    config.max_evidence = std::clamp<std::uint32_t>(config.max_evidence, 8, 4096);
 }
 
 Engine::Engine(Config config) : config_(config) {
@@ -38,10 +39,11 @@ void Engine::add(const Evidence& evidence) {
 float Engine::EvidenceStrength(const Evidence& evidence) noexcept {
     const float quality = std::clamp(evidence.data_quality, 0.0f, 1.0f);
     const float anomaly = std::clamp(evidence.anomaly, 0.0f, 1.0f);
-    const float graph_strength = std::clamp(evidence.correlation_boost, 0.0f, 0.90f);
-    // Relationship evidence is a bounded multiplicative/contextual gain, not a replacement for
-    // the underlying observation. This prevents one weak observation from becoming a ban signal.
-    return std::clamp((0.75f * anomaly + 0.25f * graph_strength) * quality, 0.0f, 1.0f);
+    const float graph = std::clamp(evidence.correlation_boost, 0.0f, 0.90f);
+    // Correlation reinforces an observation but cannot turn weak/noisy evidence into
+    // strong evidence by itself.
+    const float relationship_gain = evidence.correlation_edges == 0 ? 0.0f : 0.20f * graph;
+    return std::clamp((anomaly + relationship_gain) * quality, 0.0f, 1.0f);
 }
 
 Result Engine::evaluate() const {
@@ -49,42 +51,73 @@ Result Engine::evaluate() const {
     Result result{};
     if (evidence_.empty()) return result;
 
-    double weighted_sum = 0.0;
-    double weight = 0.0;
-    std::uint32_t high_confidence = 0;
-    std::unordered_set<std::string> families;
-    std::unordered_set<std::string> correlated_groups;
+    std::unordered_map<std::string, float> family_strength;
+    std::unordered_map<std::string, std::uint32_t> family_counts;
+    std::unordered_set<std::string> correlated_keys;
+    std::unordered_set<std::string> seen_keys;
+    float telemetry_integrity = 1.0f;
 
     for (const auto& e : evidence_) {
         const float quality = std::clamp(e.data_quality, 0.0f, 1.0f);
-        if (quality <= 0.0f) {
-            if (e.event_type == static_cast<std::uint32_t>(deac::protocol::EventType::QueueOverflow))
-                result.integrity_flags |= 1u;
+        if (e.event_type == static_cast<std::uint32_t>(deac::protocol::EventType::QueueOverflow)) {
+            result.integrity_flags |= 1u;
+            telemetry_integrity = std::min(telemetry_integrity, 0.55f);
             continue;
         }
+        if (quality <= 0.0f || e.evidence_family.empty()) continue;
 
+        const std::string family = e.evidence_family;
         const float strength = EvidenceStrength(e);
-        weighted_sum += strength;
-        weight += quality;
+        const auto key = e.evidence_key.empty()
+            ? (family + ":" + std::to_string(e.sequence))
+            : e.evidence_key;
 
-        if (strength >= config_.review_threshold && quality >= 0.80f) {
-            ++high_confidence;
-            if (!e.evidence_family.empty()) families.insert(e.evidence_family);
+        // Keep repeated observations from the same logical key from counting as independent evidence.
+        const bool first_key = seen_keys.insert(key).second;
+        const float contribution = first_key ? strength : strength * 0.20f;
+        family_strength[family] = std::max(family_strength[family], contribution);
+        family_counts[family] += 1;
+
+        if (e.correlation_edges > 0 && !e.correlation_id.empty()) {
+            correlated_keys.insert(e.correlation_id);
         }
-        if (e.correlation_edges >= 1 && !e.correlation_id.empty()) {
-            correlated_groups.insert(e.correlation_id);
+
+        if (family == "telemetry-integrity") {
+            telemetry_integrity = std::min(telemetry_integrity, quality);
         }
     }
 
-    result.confidence = weight > 0.0 ?
-        std::clamp(static_cast<float>(weighted_sum / weight), 0.0f, 1.0f) : 0.0f;
-    result.supporting_events = high_confidence;
-    result.supporting_families = static_cast<std::uint32_t>(families.size());
+    result.telemetry_integrity = telemetry_integrity;
+    result.supporting_families = static_cast<std::uint32_t>(family_strength.size());
+    for (const auto& [family, strength] : family_strength) {
+        if (strength >= config_.review_threshold) {
+            result.supporting_events += std::min<std::uint32_t>(family_counts[family], 1u);
+        }
+    }
+    result.correlated_events = static_cast<std::uint32_t>(correlated_keys.size());
+
+    // Nonlinear fusion across independent evidence families. A second observation from
+    // the same family has diminishing returns; different families reinforce one another.
+    double survival = 1.0;
+    for (const auto& [_, strength] : family_strength) {
+        const double independent = std::clamp(static_cast<double>(strength) * 0.92, 0.0, 0.92);
+        survival *= (1.0 - independent);
+    }
+    float confidence = static_cast<float>(1.0 - survival);
+
+    // Correlation is additional context, not another independent family.
+    if (result.correlated_events > 0) {
+        confidence = std::clamp(confidence + 0.06f *
+            static_cast<float>(std::min<std::uint32_t>(result.correlated_events, 3u)), 0.0f, 1.0f);
+    }
+
+    confidence *= telemetry_integrity;
+    result.confidence = std::clamp(confidence, 0.0f, 1.0f);
 
     if (result.confidence >= config_.enforce_threshold &&
         result.supporting_events >= config_.minimum_supporting_events &&
         result.supporting_families >= config_.minimum_supporting_families &&
-        !correlated_groups.empty()) {
+        result.correlated_events > 0 && telemetry_integrity >= 0.80f) {
         result.decision = Decision::Enforce;
     } else if (result.confidence >= config_.review_threshold) {
         result.decision = Decision::Review;

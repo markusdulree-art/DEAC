@@ -17,8 +17,10 @@ struct Sample final {
 struct Aggregate final {
     // received_count = samples accepted into the rolling window.
     // valid_count    = samples contributing finite/validated numeric values.
+    // invalid_count  = received_count - valid_count.
     std::uint64_t received_count{};
     std::uint64_t valid_count{};
+    std::uint64_t invalid_count{};
     float coverage_ratio{};
     float headshot_ratio{};
     float mean_aim_speed{};

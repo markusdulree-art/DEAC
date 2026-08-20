@@ -1,7 +1,5 @@
 file(REMOVE_RECURSE
   "CMakeFiles/deac_tests.dir/link.d"
-  "CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o"
-  "CMakeFiles/deac_tests.dir/service/src/deac_config.cpp.o.d"
   "CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o"
   "CMakeFiles/deac_tests.dir/service/src/deac_detection.cpp.o.d"
   "CMakeFiles/deac_tests.dir/service/src/deac_policy.cpp.o"
