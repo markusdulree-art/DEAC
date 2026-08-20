@@ -36,6 +36,9 @@ struct ModuleAssessment final {
     std::filesystem::path path;
     std::string sha256;
     std::string publisher;
+    std::string signer_thumbprint;
+    std::string mapped_path;
+    bool mapped_path_match{false};
     Provenance provenance{Provenance::Unknown};
     Verdict verdict{Verdict::Observe};
     float anomaly{};
@@ -45,6 +48,7 @@ struct ModuleAssessment final {
 
 struct MemoryAssessment final {
     std::uint64_t pid{};
+    std::uint64_t birth_token{};
     std::uintptr_t base{};
     std::size_t region_size{};
     std::uint32_t protection{};

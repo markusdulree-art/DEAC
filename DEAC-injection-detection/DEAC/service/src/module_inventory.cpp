@@ -12,10 +12,13 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cwctype>
 #include <fstream>
 #include <iterator>
 #include <limits>
 #include <vector>
+#include <sstream>
+#include <iomanip>
 
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "wintrust.lib")
@@ -55,7 +58,7 @@ bool ReadFileBounded(const std::filesystem::path& path, std::vector<std::uint8_t
     return static_cast<std::size_t>(in.gcount()) == bytes.size();
 }
 
-bool VerifySignature(const std::filesystem::path& path, std::string& publisher) {
+bool VerifySignature(const std::filesystem::path& path, std::string& publisher, std::string& thumbprint) {
     WINTRUST_FILE_INFO file{};
     file.cbStruct = sizeof(file);
     std::wstring wide = path.wstring();
@@ -97,6 +100,16 @@ bool VerifySignature(const std::filesystem::path& path, std::string& publisher) 
             PCCERT_CONTEXT cert = CertFindCertificateInStore(
                 store, encoding, 0, CERT_FIND_SUBJECT_CERT, &cert_info, nullptr);
             if (cert) {
+                BYTE hash[64]{};
+                DWORD hash_size = sizeof(hash);
+                if (CertGetCertificateContextProperty(cert, CERT_HASH_PROP_ID, hash, &hash_size)) {
+                    std::ostringstream oss;
+                    for (DWORD i = 0; i < hash_size; ++i) {
+                        oss << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                            << static_cast<unsigned>(hash[i]);
+                    }
+                    thumbprint = oss.str();
+                }
                 char name[512]{};
                 if (CertGetNameStringA(cert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0,
                                        nullptr, name, sizeof(name)) > 1) {
@@ -196,44 +209,82 @@ ModuleAssessment Inventory::Assess(std::uint64_t pid, const std::filesystem::pat
     }
 
     std::string publisher;
-    const bool signed_valid = VerifySignature(result.path, publisher);
+    std::string signer_thumbprint;
+    const bool signed_valid = VerifySignature(result.path, publisher, signer_thumbprint);
     result.publisher = publisher;
+    result.signer_thumbprint = signer_thumbprint;
     const auto publisher_lower = ClassifyPublisher(publisher);
+    const bool under_game = IsPathUnder(result.path, game_root_);
+    const bool under_windows = IsPathUnder(result.path, windows_root_);
 
-    if (IsPathUnder(result.path, windows_root_)) {
-        result.provenance = signed_valid ? Provenance::MicrosoftSigned : Provenance::WindowsSystem;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = signed_valid ? 0.0f : 0.05f;
-    } else if (signed_valid && publisher_lower.find("valve") != std::string::npos) {
-        result.provenance = Provenance::ValveSigned;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = 0.0f;
-    } else if (signed_valid && publisher_lower.find("steam") != std::string::npos) {
-        result.provenance = Provenance::SteamSigned;
-        result.verdict = Verdict::Trusted;
-        result.anomaly = 0.0f;
-    } else if (signed_valid && publisher_lower.find("microsoft") != std::string::npos) {
+    bool known_baseline = false;
+    if (!result.sha256.empty()) {
+        std::scoped_lock lock(mutex_);
+        known_baseline = baseline_hashes_.find(result.sha256) != baseline_hashes_.end();
+    }
+
+    if (!signed_valid) {
+        result.provenance = under_game ? Provenance::GameRootUnsigned :
+                             (under_windows ? Provenance::WindowsSystem : Provenance::ExternalUnsigned);
+        result.verdict = under_game && known_baseline ? Verdict::Observe : Verdict::Suspicious;
+        result.anomaly = result.verdict == Verdict::Suspicious ? 0.92f : 0.08f;
+    } else if (under_windows) {
         result.provenance = Provenance::MicrosoftSigned;
         result.verdict = Verdict::Trusted;
-        result.anomaly = 0.0f;
+        result.anomaly = 0.01f;
+    } else if (under_game && publisher_lower.find("valve") != std::string::npos) {
+        result.provenance = Provenance::ValveSigned;
+        result.verdict = Verdict::Trusted;
+        result.anomaly = 0.01f;
+    } else if (under_game && publisher_lower.find("steam") != std::string::npos) {
+        result.provenance = Provenance::SteamSigned;
+        result.verdict = Verdict::Trusted;
+        result.anomaly = 0.01f;
+    } else if (under_game && publisher_lower.find("microsoft") != std::string::npos) {
+        result.provenance = Provenance::MicrosoftSigned;
+        result.verdict = Verdict::Trusted;
+        result.anomaly = 0.01f;
     } else if (signed_valid) {
-        // Signed third-party modules are not automatically malicious. Keep them observable.
+        // A valid Authenticode signature is meaningful provenance, but a third-party publisher
+        // is intentionally observable instead of implicitly trusted as game content.
         result.provenance = Provenance::TrustedThirdPartySigned;
         result.verdict = Verdict::Observe;
-        result.anomaly = IsTrustedRoot(result.path) ? 0.05f : 0.20f;
-    } else if (IsPathUnder(result.path, game_root_)) {
-        // Steam/Valve content is normally established in the initial inventory. An unsigned
-        // module already present at service startup is therefore treated as baseline content,
-        // while a new unsigned hash appearing later is materially more suspicious.
-        result.provenance = Provenance::GameRootUnsigned;
-        const bool known_baseline = baseline_hashes_.find(result.sha256) != baseline_hashes_.end();
-        result.verdict = known_baseline ? Verdict::Observe : Verdict::Suspicious;
-        result.anomaly = known_baseline ? 0.05f : 0.82f;
+        result.anomaly = 0.12f;
     } else {
         result.provenance = Provenance::ExternalUnsigned;
         result.verdict = Verdict::Suspicious;
         result.anomaly = 0.95f;
     }
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                                 FALSE, static_cast<DWORD>(pid));
+    if (process && base != 0) {
+        wchar_t mapped[32768]{};
+        const DWORD length = GetMappedFileNameW(process, reinterpret_cast<LPVOID>(base), mapped,
+                                                static_cast<DWORD>(std::size(mapped)));
+        if (length > 0) {
+            result.mapped_path.assign(mapped, mapped + length);
+            // Device-path translation varies by volume. For safety, compare exact normalized
+            // paths when available; otherwise keep the mapping observable without treating mismatch
+            // as a verdict by itself.
+            auto lower_w = [](std::wstring value) {
+                std::transform(value.begin(), value.end(), value.begin(), [](wchar_t c) {
+                    return static_cast<wchar_t>(towlower(c));
+                });
+                return value;
+            };
+            const auto mapped_lower = lower_w(result.mapped_path);
+            const auto path_lower = lower_w(result.path.wstring());
+            result.mapped_path_match = mapped_lower == path_lower ||
+                (mapped_lower.size() >= path_lower.size() &&
+                 mapped_lower.compare(mapped_lower.size() - path_lower.size(), path_lower.size(), path_lower) == 0);
+            if (!result.mapped_path_match) {
+                result.anomaly = std::clamp(result.anomaly + 0.10f, 0.0f, 1.0f);
+            }
+        }
+        CloseHandle(process);
+    }
+
     return result;
 }
 
@@ -259,7 +310,8 @@ std::vector<ModuleAssessment> Inventory::Refresh(std::uint64_t pid) {
     std::lock_guard lock(mutex_);
     if (!baseline_established_) {
         for (const auto& item : current) {
-            if (!item.sha256.empty() && IsPathUnder(item.path, game_root_)) {
+            if (!item.sha256.empty() && item.verdict == Verdict::Trusted &&
+                IsPathUnder(item.path, game_root_)) {
                 baseline_hashes_.insert(item.sha256);
             }
         }

@@ -9,13 +9,6 @@
 
 namespace deac::graph {
 
-enum class NodeType : std::uint32_t {
-    Process = 1,
-    Module = 2,
-    MemoryRegion = 3,
-    Observation = 4,
-};
-
 enum class EventKind : std::uint32_t {
     Unknown = 0,
     ProcessCreated,
@@ -50,6 +43,13 @@ struct Correlation final {
     float boost{};
 };
 
+struct TimingConfig final {
+    std::uint64_t handle_to_module_ms{500};
+    std::uint64_t handle_to_memory_ms{1000};
+    std::uint64_t module_to_memory_ms{2000};
+    std::uint64_t generic_ms{5000};
+};
+
 struct Snapshot final {
     std::size_t events{};
     std::size_t active_targets{};
@@ -59,7 +59,7 @@ struct Snapshot final {
 
 class EvidenceGraph final {
 public:
-    explicit EvidenceGraph(std::uint64_t window_ms = 10'000, std::size_t capacity = 4096);
+    explicit EvidenceGraph(TimingConfig timing = {}, std::size_t capacity = 4096);
 
     void observe(Event event);
     Correlation correlate(const identity::ProcessIdentity& source,
@@ -75,10 +75,11 @@ public:
     void clear();
 
 private:
-    bool sameProcess(const identity::ProcessIdentity& a, const identity::ProcessIdentity& b) const noexcept;
+    static bool sameProcess(const identity::ProcessIdentity& a, const identity::ProcessIdentity& b) noexcept;
+    std::uint64_t WindowFor(EventKind current_kind, EventKind prior_kind) const noexcept;
     static float EdgeBoost(const Correlation& c) noexcept;
 
-    std::uint64_t window_ms_;
+    TimingConfig timing_;
     std::size_t capacity_;
     mutable std::mutex mutex_;
     std::deque<Event> events_;

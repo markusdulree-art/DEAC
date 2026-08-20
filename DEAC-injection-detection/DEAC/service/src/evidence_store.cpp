@@ -1,8 +1,9 @@
 #include "evidence_store.h"
 #include <iomanip>
-#include <utility>
+#include <nlohmann/json.hpp>
 
 namespace deac::evidence {
+using json = nlohmann::json;
 
 Store::Store(std::filesystem::path path) : path_(std::move(path)) {
     std::error_code ec;
@@ -10,21 +11,30 @@ Store::Store(std::filesystem::path path) : path_(std::move(path)) {
     out_.open(path_, std::ios::out | std::ios::app);
 }
 
-bool Store::append(const policy::Evidence& evidence) {
+bool Store::append(const policy::Evidence& e) {
     std::scoped_lock lock(mutex_);
     if (!out_.is_open()) return false;
-    out_ << evidence.timestamp_ms << ','
-         << evidence.sequence << ','
-         << std::setprecision(7) << evidence.anomaly << ','
-         << evidence.data_quality << ','
-         << evidence.event_type << ','
-         << evidence.pid << ','
-         << evidence.tid << ','
-         << evidence.source_pid << ','
-         << evidence.source_birth_token << ','
-         << evidence.correlation_edges << ','
-         << std::setprecision(7) << evidence.correlation_boost << ','
-         << evidence.evidence_key << '\n';
+
+    const json record = {
+        {"timestamp_ms", e.timestamp_ms},
+        {"sequence", e.sequence},
+        {"event_type", e.event_type},
+        {"pid", e.pid},
+        {"tid", e.tid},
+        {"source_pid", e.source_pid},
+        {"source_birth_token", e.source_birth_token},
+        {"target_process", e.target.Key()},
+        {"source_process", e.source.Key()},
+        {"anomaly", e.anomaly},
+        {"data_quality", e.data_quality},
+        {"correlation_edges", e.correlation_edges},
+        {"correlation_boost", e.correlation_boost},
+        {"evidence_key", e.evidence_key},
+        {"evidence_family", e.evidence_family},
+        {"correlation_id", e.correlation_id}
+    };
+
+    out_ << record.dump() << '\n';
     out_.flush();
     if (out_) { ++records_; return true; }
     return false;

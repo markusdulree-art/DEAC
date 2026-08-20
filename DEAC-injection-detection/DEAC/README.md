@@ -138,3 +138,22 @@ Allow / Monitor / Review / Enforce
 ```
 
 The graph is deliberately an evidence layer rather than a direct ban mechanism. Correlation strength is bounded, and loss of telemetry is represented explicitly so the policy layer can account for incomplete observation.
+
+
+## v5 hardening pass
+
+This iteration applies the next set of security-engineering fixes on top of the evidence graph:
+
+- Process-instance identity is carried into policy evidence and session/audit records.
+- Evidence fusion now requires independent evidence families for enforcement and treats graph relationships as contextual strength rather than simply adding a raw score.
+- Correlation windows are event-specific instead of one global ten-second window.
+- Memory-region deduplication is scoped to the CS2 process instance, region size, and protection state.
+- Telemetry distinguishes received samples from valid samples and exposes coverage ratio.
+- Module assessment records signer certificate thumbprints and a best-effort mapped-image path check; startup baselines contain only already-trusted game-root hashes, never arbitrary unsigned content.
+- Audit/evidence records are structured JSONL rather than message-heavy/CSV records.
+- Queue health distinguishes operational state from historical loss.
+- Handle telemetry is filtered in-kernel to reduce background noise while retaining CS2-targeted and security-sensitive observations; pre-operation requested access is no longer represented as final granted access.
+- Configuration uses JSON parsing and Windows atomic replacement semantics instead of regex extraction and delete-then-rename.
+- Update protocol compatibility tracks `kProtocolVersion` rather than a stale constant.
+
+The portable test target is intentionally built without Windows-only configuration code on non-Windows hosts; the Windows service target continues to include the full configuration implementation.

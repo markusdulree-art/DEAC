@@ -12,17 +12,35 @@ Log::Log(std::filesystem::path path) : path_(std::move(path)) {
 }
 
 bool Log::write(std::string_view category, std::string_view message) {
+    Record record{};
+    record.category = std::string(category);
+    record.message = std::string(message);
+    return write(record);
+}
+
+bool Log::write(const Record& r) {
     std::scoped_lock lock(mutex_);
     std::ofstream out(path_, std::ios::out | std::ios::app);
     if (!out) return false;
 
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto wall = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    const json record = {
-        {"timestamp_ms", now},
-        {"category", category},
-        {"message", message}
+
+    json record = {
+        {"wall_time_ms", wall},
+        {"monotonic_ms", r.monotonic_ms},
+        {"sequence", r.sequence},
+        {"event_type", r.event_type},
+        {"category", r.category},
+        {"message", r.message},
+        {"session_id", r.session_id},
+        {"evidence_key", r.evidence_key},
+        {"correlation_id", r.correlation_id},
+        {"anomaly", r.anomaly},
+        {"quality", r.quality}
     };
+    if (r.target) record["target_process"] = r.target->Key();
+    if (r.source) record["source_process"] = r.source->Key();
     out << record.dump() << '\n';
     return static_cast<bool>(out);
 }

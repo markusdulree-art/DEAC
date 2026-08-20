@@ -13,6 +13,7 @@ struct Settings final {
     std::uint32_t heartbeat_timeout_ms{5000};
     std::uint32_t evidence_flush_ms{1000};
     std::uint32_t minimum_supporting_events{3};
+    std::uint32_t minimum_supporting_families{2};
     float monitor_threshold{0.70f};
     float review_threshold{0.82f};
     float enforce_threshold{0.93f};

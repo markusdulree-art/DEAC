@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <cassert>
 #include <iostream>
+#include <limits>
 
 int main() {
     deac::telemetry::Aggregate empty{};
@@ -25,17 +26,35 @@ int main() {
     const auto score = deac::detection::Evaluate(aggregate);
     assert(score.anomaly > 0.85f);
     assert(score.action_ready);
+    assert(aggregate.received_count == 500);
+    assert(aggregate.valid_count == 500);
+    assert(aggregate.coverage_ratio > 0.99f);
 
-    deac::policy::Engine policy({0.70f, 0.82f, 0.93f, 3, 16});
+    deac::policy::Engine policy({0.70f, 0.82f, 0.93f, 3, 2, 16});
     for (int i = 0; i < 3; ++i) {
         deac::policy::Evidence e{};
         e.anomaly = 0.96f; e.data_quality = 1.0f; e.event_type = 9; e.sequence = i + 1;
+        e.evidence_family = (i == 0 ? "module-provenance" : (i == 1 ? "memory-integrity" : "handle-integrity"));
+        e.correlation_id = "session:1";
         policy.add(e);
     }
     const auto result = policy.evaluate();
     assert(result.decision == deac::policy::Decision::Enforce);
     assert(result.supporting_events == 3);
 
+
+    {
+        deac::telemetry::Engine invalids;
+        deac::telemetry::Sample bad{};
+        bad.aim_speed_deg_s = std::numeric_limits<float>::quiet_NaN();
+        for (int i = 0; i < 30; ++i) invalids.add(bad);
+        const auto a = invalids.aggregate();
+        assert(a.received_count == 30);
+        assert(a.valid_count == 0);
+        assert(a.coverage_ratio == 0.0f);
+    }
+
+#ifdef _WIN32
     const auto configPath = std::filesystem::temp_directory_path() / "deac_config_test.json";
     auto settings = deac::config::Defaults();
     settings.telemetry_port = 80;
@@ -49,13 +68,15 @@ int main() {
     assert(loaded.review_threshold <= loaded.enforce_threshold);
     std::filesystem::remove(configPath);
 
+#endif
+
 
     {
         using namespace deac;
         identity::ProcessIdentity cs2{100, 10001, "cs2.exe"};
         identity::ProcessIdentity helper{200, 20002, "helper.exe"};
         identity::ProcessIdentity reused{200, 20003, "helper.exe"};
-        graph::EvidenceGraph graph(10000, 128);
+        graph::EvidenceGraph graph(deac::graph::TimingConfig{1000, 1200, 2000, 5000}, 128);
 
         graph.observe({1000, 1, graph::EventKind::DangerousHandle, cs2, helper, "handle", 0.25f, 0.35f});
         graph.observe({1100, 2, graph::EventKind::ImageLoaded, cs2, {}, "unsigned-module", 0.92f, 0.90f});

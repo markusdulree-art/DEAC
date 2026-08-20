@@ -4,7 +4,7 @@
 
 namespace deac::protocol {
 
-inline constexpr std::uint32_t kProtocolVersion = 4;
+inline constexpr std::uint32_t kProtocolVersion = 5;
 inline constexpr std::uint32_t kMaxEventPayload = 512;
 
 using ProcessId = std::uint64_t;
@@ -30,7 +30,8 @@ enum class DriverCapability : std::uint32_t {
     ThreadCallbacks = 1u << 1,
     ImageCallbacks = 1u << 2,
     HandleCallbacks = 1u << 3,
-    QueueHealthy = 1u << 4,
+    QueueOperational = 1u << 4,
+    QueueLossDetected = 1u << 5,
 };
 
 enum class PlatformLevel : std::uint32_t {
@@ -81,6 +82,7 @@ struct ImagePayload final {
 struct HandlePayload final {
     std::uint64_t source_pid;
     std::uint32_t desired_access;
+    // Zero for pre-operation events; the pre-op callback observes requested access, not final granted access.
     std::uint32_t granted_access;
     std::uint32_t operation;
     std::uint32_t reserved;

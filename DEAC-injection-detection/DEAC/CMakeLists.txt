@@ -48,7 +48,6 @@ add_executable(deac_tests
     service/src/telemetry_engine.cpp
     service/src/deac_detection.cpp
     service/src/deac_policy.cpp
-    service/src/deac_config.cpp
     service/src/process_identity.cpp
     service/src/evidence_graph.cpp
 )

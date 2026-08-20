@@ -2,13 +2,14 @@
 
 #include <algorithm>
 #include <fstream>
-#include <regex>
-#include <string>
-#include <type_traits>
+#include <nlohmann/json.hpp>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 namespace deac::config {
-
 namespace {
+using json = nlohmann::json;
 
 template <typename T>
 T ClampValue(T value, T lo, T hi) { return std::clamp(value, lo, hi); }
@@ -20,54 +21,36 @@ void Sanitize(Settings& s) {
     s.heartbeat_timeout_ms = ClampValue<std::uint32_t>(s.heartbeat_timeout_ms, 1000, 60000);
     s.evidence_flush_ms = ClampValue<std::uint32_t>(s.evidence_flush_ms, 100, 10000);
     s.minimum_supporting_events = ClampValue<std::uint32_t>(s.minimum_supporting_events, 1, 100);
+    s.minimum_supporting_families = ClampValue<std::uint32_t>(s.minimum_supporting_families, 1, 10);
     s.monitor_threshold = ClampValue(s.monitor_threshold, 0.0f, 1.0f);
     s.review_threshold = ClampValue(s.review_threshold, s.monitor_threshold, 1.0f);
     s.enforce_threshold = ClampValue(s.enforce_threshold, s.review_threshold, 1.0f);
 }
 
-std::string ReadAll(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return {};
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
-
-template <typename T>
-void ReadNumber(const std::string& text, const char* key, T& out) {
-    const std::regex expression(std::string("\\\"") + key + "\\\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
-    std::smatch match;
-    if (std::regex_search(text, match, expression)) {
-        try {
-            if constexpr (std::is_floating_point_v<T>) out = static_cast<T>(std::stod(match[1].str()));
-            else out = static_cast<T>(std::stoull(match[1].str()));
-        } catch (...) {}
-    }
-}
-
-void ReadBool(const std::string& text, const char* key, bool& out) {
-    const std::regex expression(std::string("\\\"") + key + "\\\"\\s*:\\s*(true|false)");
-    std::smatch match;
-    if (std::regex_search(text, match, expression)) out = match[1].str() == "true";
-}
-
-} // namespace
 
 Settings Defaults() { return {}; }
 
 Settings Load(const std::filesystem::path& path) {
     Settings result = Defaults();
-    const std::string text = ReadAll(path);
-    if (text.empty()) return result;
-
-    ReadNumber(text, "telemetry_port", result.telemetry_port);
-    ReadNumber(text, "telemetry_max_body_bytes", result.telemetry_max_body_bytes);
-    ReadNumber(text, "telemetry_poll_ms", result.telemetry_poll_ms);
-    ReadNumber(text, "heartbeat_timeout_ms", result.heartbeat_timeout_ms);
-    ReadNumber(text, "evidence_flush_ms", result.evidence_flush_ms);
-    ReadNumber(text, "minimum_supporting_events", result.minimum_supporting_events);
-    ReadNumber(text, "monitor_threshold", result.monitor_threshold);
-    ReadNumber(text, "review_threshold", result.review_threshold);
-    ReadNumber(text, "enforce_threshold", result.enforce_threshold);
-    ReadBool(text, "enable_local_http", result.enable_local_http);
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return result;
+    try {
+        const auto j = json::parse(input);
+        if (j.contains("telemetry_port")) result.telemetry_port = j.at("telemetry_port").get<std::uint16_t>();
+        if (j.contains("telemetry_max_body_bytes")) result.telemetry_max_body_bytes = j.at("telemetry_max_body_bytes").get<std::uint32_t>();
+        if (j.contains("telemetry_poll_ms")) result.telemetry_poll_ms = j.at("telemetry_poll_ms").get<std::uint32_t>();
+        if (j.contains("heartbeat_timeout_ms")) result.heartbeat_timeout_ms = j.at("heartbeat_timeout_ms").get<std::uint32_t>();
+        if (j.contains("evidence_flush_ms")) result.evidence_flush_ms = j.at("evidence_flush_ms").get<std::uint32_t>();
+        if (j.contains("minimum_supporting_events")) result.minimum_supporting_events = j.at("minimum_supporting_events").get<std::uint32_t>();
+        if (j.contains("minimum_supporting_families")) result.minimum_supporting_families = j.at("minimum_supporting_families").get<std::uint32_t>();
+        if (j.contains("monitor_threshold")) result.monitor_threshold = j.at("monitor_threshold").get<float>();
+        if (j.contains("review_threshold")) result.review_threshold = j.at("review_threshold").get<float>();
+        if (j.contains("enforce_threshold")) result.enforce_threshold = j.at("enforce_threshold").get<float>();
+        if (j.contains("enable_local_http")) result.enable_local_http = j.at("enable_local_http").get<bool>();
+    } catch (...) {
+        return Defaults();
+    }
     Sanitize(result);
     return result;
 }
@@ -84,29 +67,36 @@ bool Save(const std::filesystem::path& path, const Settings& input) {
     {
         std::ofstream output(tmp, std::ios::binary | std::ios::trunc);
         if (!output) return false;
-        output << "{\n"
-               << "  \"telemetry_port\": " << settings.telemetry_port << ",\n"
-               << "  \"telemetry_max_body_bytes\": " << settings.telemetry_max_body_bytes << ",\n"
-               << "  \"telemetry_poll_ms\": " << settings.telemetry_poll_ms << ",\n"
-               << "  \"heartbeat_timeout_ms\": " << settings.heartbeat_timeout_ms << ",\n"
-               << "  \"evidence_flush_ms\": " << settings.evidence_flush_ms << ",\n"
-               << "  \"minimum_supporting_events\": " << settings.minimum_supporting_events << ",\n"
-               << "  \"monitor_threshold\": " << settings.monitor_threshold << ",\n"
-               << "  \"review_threshold\": " << settings.review_threshold << ",\n"
-               << "  \"enforce_threshold\": " << settings.enforce_threshold << ",\n"
-               << "  \"enable_local_http\": " << (settings.enable_local_http ? "true" : "false") << "\n"
-               << "}\n";
+        const json j = {
+            {"telemetry_port", settings.telemetry_port},
+            {"telemetry_max_body_bytes", settings.telemetry_max_body_bytes},
+            {"telemetry_poll_ms", settings.telemetry_poll_ms},
+            {"heartbeat_timeout_ms", settings.heartbeat_timeout_ms},
+            {"evidence_flush_ms", settings.evidence_flush_ms},
+            {"minimum_supporting_events", settings.minimum_supporting_events},
+            {"minimum_supporting_families", settings.minimum_supporting_families},
+            {"monitor_threshold", settings.monitor_threshold},
+            {"review_threshold", settings.review_threshold},
+            {"enforce_threshold", settings.enforce_threshold},
+            {"enable_local_http", settings.enable_local_http}
+        };
+        output << j.dump(2) << '\n';
         if (!output) return false;
     }
 
-    std::filesystem::remove(path, ec);
-    ec.clear();
-    std::filesystem::rename(tmp, path, ec);
-    if (ec) {
+#ifdef _WIN32
+    const auto tmpw = std::filesystem::path(tmp).wstring();
+    const auto destw = path.wstring();
+    if (!MoveFileExW(tmpw.c_str(), destw.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         std::filesystem::remove(tmp, ec);
         return false;
     }
     return true;
+#else
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) { std::filesystem::remove(tmp, ec); return false; }
+    return true;
+#endif
 }
 
 } // namespace deac::config

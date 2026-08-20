@@ -1,5 +1,6 @@
 #include "update_manager.h"
 #include "privacy.h"
+#include "deac_protocol.h"
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <windows.h>
@@ -48,9 +49,13 @@ bool Manager::verifyArtifactSha256(const std::filesystem::path& artifact, const 
 
 bool Manager::accept(const Manifest& manifest) const {
     if (manifest.product != product_) return false;
-    if (manifest.minimum_protocol > 1) return false;
+    if (manifest.minimum_protocol > deac::protocol::kProtocolVersion) return false;
     if (manifest.artifact_url.rfind("https://", 0) != 0) return false;
     if (manifest.artifact_sha256.size() != 64) return false;
+    for (const char c : manifest.artifact_sha256) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    }
+    if (manifest.version.empty()) return false;
     return true;
 }
 

@@ -65,19 +65,30 @@ VOID ImageNotify(_In_opt_ PUNICODE_STRING FullImageName, _In_ HANDLE ProcessId, 
 OB_PREOP_CALLBACK_STATUS ObPreOperation(_In_ PVOID, _Inout_ POB_PRE_OPERATION_INFORMATION information) {
     if (!information || information->ObjectType != *PsProcessType) return OB_PREOP_SUCCESS;
     if (information->Operation == OB_OPERATION_HANDLE_CREATE || information->Operation == OB_OPERATION_HANDLE_DUPLICATE) {
+        const auto target_process = reinterpret_cast<PEPROCESS>(information->Object);
+        const auto target = PsGetProcessId(target_process);
+        ULONG_PTR desired_access = 0;
+        if (information->Operation == OB_OPERATION_HANDLE_CREATE) {
+            desired_access = information->Parameters->CreateHandleInformation.DesiredAccess;
+        } else {
+            desired_access = information->Parameters->DuplicateHandleInformation.DesiredAccess;
+        }
+
+        const bool sensitive = (desired_access &
+            (PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_CREATE_THREAD | PROCESS_DUP_HANDLE)) != 0;
+        const char* image_name = PsGetProcessImageFileName(target_process);
+        const bool is_cs2 = image_name && RtlCompareMemory(image_name, "cs2.exe", 7) == 7;
+        // Handle callbacks can be extremely noisy. Preserve all observations for CS2 and
+        // security-relevant access to other processes; discard low-value background noise here.
+        if (!sensitive && !is_cs2) return OB_PREOP_SUCCESS;
+
         deac::protocol::Event event{};
-        const auto target = PsGetProcessId(reinterpret_cast<PEPROCESS>(information->Object));
         FillBaseEvent(&event, deac::protocol::EventType::ProtectedHandleAttempt, target, nullptr);
         deac::protocol::HandlePayload payload{};
         payload.source_pid = reinterpret_cast<ULONG_PTR>(PsGetCurrentProcessId());
         payload.operation = information->Operation;
-        if (information->Operation == OB_OPERATION_HANDLE_CREATE) {
-            payload.desired_access = information->Parameters->CreateHandleInformation.DesiredAccess;
-            payload.granted_access = information->Parameters->CreateHandleInformation.OriginalDesiredAccess;
-        } else {
-            payload.desired_access = information->Parameters->DuplicateHandleInformation.DesiredAccess;
-            payload.granted_access = information->Parameters->DuplicateHandleInformation.OriginalDesiredAccess;
-        }
+        payload.granted_access = 0; // Pre-operation callback; actual granted access is not known here.
+        payload.desired_access = static_cast<std::uint32_t>(desired_access);
         event.payload_size = sizeof(payload);
         RtlCopyMemory(event.payload, &payload, sizeof(payload));
         (void)deac::kernel::g_event_queue.Push(event);
@@ -122,7 +133,7 @@ NTSTATUS DeacRegisterCallbacks() {
     } else {
         g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::HandleCallbacks);
     }
-    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::QueueHealthy);
+    g_capability_flags |= static_cast<ULONG>(deac::protocol::DriverCapability::QueueOperational);
     return STATUS_SUCCESS;
 }
 

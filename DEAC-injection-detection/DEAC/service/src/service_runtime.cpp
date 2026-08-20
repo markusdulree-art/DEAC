@@ -74,7 +74,7 @@ namespace deac::service {
 Runtime::Runtime()
     : settings_(config::Defaults()),
       policy_engine_(policy::Config{}),
-      evidence_(ProgramDataRoot() / L"evidence.csv"),
+      evidence_(ProgramDataRoot() / L"evidence.jsonl"),
       audit_(ProgramDataRoot() / L"audit.jsonl"),
       graph_(10'000, 4096) {}
 
@@ -92,6 +92,7 @@ bool Runtime::start() {
         settings_.review_threshold,
         settings_.enforce_threshold,
         settings_.minimum_supporting_events,
+        settings_.minimum_supporting_families,
         256
     });
 
@@ -146,7 +147,7 @@ void Runtime::eventLoop() {
     std::uint64_t last_status_poll_ms = 0;
     std::uint64_t last_sequence = 0;
     std::uint64_t last_dropped = driver_dropped_.load(std::memory_order_acquire);
-    std::unordered_map<std::uintptr_t, std::uint64_t> recent_private_regions;
+    std::unordered_map<std::string, std::uint64_t> recent_private_regions;
 
     while (!stopping_.load(std::memory_order_acquire)) {
         const auto event = driver.nextEvent();
@@ -163,10 +164,16 @@ void Runtime::eventLoop() {
                     loss.anomaly = 0.0f;
                     loss.data_quality = 0.0f;
                     loss.evidence_key = "telemetry_loss";
-                    loss.correlation_edges = 0;
+                    loss.evidence_family = "telemetry-integrity";
                     policy_engine_.add(loss);
                     (void)evidence_.append(loss);
-                    audit_.write("telemetry", "kernel event queue loss detected");
+                    audit::Record rec{};
+                    rec.category = "telemetry";
+                    rec.message = "kernel event queue loss detected";
+                    rec.monotonic_ms = now_ms;
+                    rec.evidence_key = loss.evidence_key;
+                    rec.session_id = cs2_identity_.Key();
+                    audit_.write(rec);
                     last_dropped = status->queue_dropped;
                 }
             }
@@ -192,7 +199,10 @@ void Runtime::eventLoop() {
             const auto regions = module_inventory_.ScanExecutablePrivateRegions(tracked_pid);
             for (const auto& region : regions) {
                 if (!region.pe_header && !region.writable) continue;
-                if (!recent_private_regions.emplace(region.base, now_ms).second) continue;
+                region.birth_token = target.birth_token;
+                const std::string region_key = target.Key() + ":" + std::to_string(region.base) + ":" +
+                    std::to_string(region.region_size) + ":" + std::to_string(region.protection);
+                if (!recent_private_regions.emplace(region_key, now_ms).second) continue;
 
                 const auto kind = region.pe_header ? graph::EventKind::MemoryPrivateExecutablePe
                                                    : graph::EventKind::MemoryPrivateExecutable;
@@ -204,9 +214,12 @@ void Runtime::eventLoop() {
                 memory.timestamp_ms = now_ms;
                 memory.event_type = static_cast<std::uint32_t>(protocol::EventType::MemoryAnomaly);
                 memory.pid = tracked_pid;
+                memory.target = target;
                 memory.anomaly = region.anomaly;
                 memory.data_quality = region.pe_header ? 0.94f : 0.55f;
                 memory.evidence_key = region.pe_header ? "private_pe" : "private_executable";
+                memory.evidence_family = "memory-integrity";
+                memory.correlation_id = target.Key() + ":" + region_key;
 
                 const auto sources = graph_.recent_sources(target, graph::EventKind::DangerousHandle, now_ms);
                 for (const auto& source : sources) {
@@ -214,6 +227,7 @@ void Runtime::eventLoop() {
                     if (corr.handle_before_memory) {
                         memory.source_pid = source.pid;
                         memory.source_birth_token = source.birth_token;
+                        memory.source = source;
                         memory.correlation_edges = corr.supporting_edges;
                         memory.correlation_boost = corr.boost;
                         memory.anomaly = std::max(memory.anomaly, 0.995f);
@@ -245,6 +259,7 @@ void Runtime::eventLoop() {
             gap.anomaly = 0.0f;
             gap.data_quality = 0.0f;
             gap.evidence_key = "sequence_gap";
+            gap.evidence_family = "telemetry-integrity";
             policy_engine_.add(gap);
             (void)evidence_.append(gap);
             audit_.write("telemetry", "kernel event sequence gap detected");
@@ -264,7 +279,15 @@ void Runtime::eventLoop() {
             cs2_identity_ = identity_tracker_.observe(event->pid);
             module_inventory_.AttachToProcess(event->pid);
             const auto snapshot = module_inventory_.Refresh(event->pid);
-            audit_.write("cs2", "process discovered; stable process identity established");
+            audit::Record session_rec{};
+            session_rec.category = "cs2";
+            session_rec.message = "process discovered; stable process identity established";
+            session_rec.monotonic_ms = now_ms;
+            session_rec.sequence = event->sequence;
+            session_rec.event_type = event->type;
+            session_rec.session_id = cs2_identity_.Key();
+            session_rec.target = cs2_identity_;
+            audit_.write(session_rec);
             for (const auto& module : snapshot) {
                 graph_.observe(graph::Event{now_ms, event->sequence, graph::EventKind::ImageLoaded,
                                             cs2_identity_, {}, module.sha256, module.anomaly,
@@ -282,7 +305,15 @@ void Runtime::eventLoop() {
                                         cs2_identity_, {}, {}, 0.0f, 1.0f});
             cs2_pid_.store(0, std::memory_order_release);
             identity_tracker_.remove(event->pid);
-            audit_.write("cs2", "process exited; evidence graph retained for current session");
+            audit::Record session_rec{};
+            session_rec.category = "cs2";
+            session_rec.message = "process exited; evidence graph retained for current session";
+            session_rec.monotonic_ms = now_ms;
+            session_rec.sequence = event->sequence;
+            session_rec.event_type = event->type;
+            session_rec.session_id = cs2_identity_.Key();
+            session_rec.target = cs2_identity_;
+            audit_.write(session_rec);
             continue;
         }
 
@@ -328,30 +359,38 @@ void Runtime::eventLoop() {
                                               PROCESS_CREATE_THREAD | PROCESS_DUP_HANDLE)) != 0;
             const bool read = (access & PROCESS_VM_READ) != 0;
             evidence.source_pid = payload->source_pid;
+            evidence.target = cs2_identity_;
+            evidence.source = identity_tracker_.observe(payload->source_pid);
             if (dangerous) {
                 evidence.anomaly = 0.25f;
                 evidence.data_quality = 0.35f;
                 evidence.evidence_key = "dangerous_handle";
+                evidence.evidence_family = "handle-integrity";
                 audit_.write("handle", "CS2 dangerous handle source=" + std::to_string(payload->source_pid));
             } else if (read) {
                 evidence.anomaly = 0.08f;
                 evidence.data_quality = 0.12f;
                 evidence.evidence_key = "read_handle";
+                evidence.evidence_family = "handle-observation";
             }
         } else if (type == protocol::EventType::ImageLoaded &&
                    event->pid == cs2_pid_.load(std::memory_order_acquire)) {
             const auto module = module_inventory_.ObserveImageLoad(*event);
             if (module.verdict == modules::Verdict::Suspicious) {
                 evidence.anomaly = module.anomaly;
-                evidence.data_quality = 0.90f;
+                evidence.data_quality = module.mapped_path.empty() || module.mapped_path_match ? 0.90f : 0.96f;
                 evidence.evidence_key = "suspicious_module:" + module.sha256;
+                evidence.evidence_family = "module-provenance";
+                evidence.target = cs2_identity_;
                 const auto sources = graph_.recent_sources(cs2_identity_, graph::EventKind::DangerousHandle, now_ms);
                 for (const auto& source : sources) {
                     const auto corr = graph_.correlate(source, cs2_identity_, graph::EventKind::ImageLoaded, now_ms);
                     if (corr.handle_before_module) {
                         evidence.source_pid = source.pid;
                         evidence.source_birth_token = source.birth_token;
+                        evidence.source = source;
                         evidence.correlation_edges = corr.supporting_edges;
+                        evidence.correlation_id = cs2_identity_.Key() + ":" + module.sha256;
                         evidence.correlation_boost = corr.boost;
                         evidence.anomaly = std::max(evidence.anomaly, 0.98f);
                         evidence.data_quality = std::max(evidence.data_quality, 0.98f);
@@ -378,7 +417,7 @@ void Runtime::eventLoop() {
 void Runtime::telemetryLoop() {
     while (!stopping_.load(std::memory_order_acquire)) {
         const auto aggregate = telemetry_engine_.aggregate();
-        if (aggregate.sample_count >= 20) {
+        if (aggregate.valid_count >= 20) {
             const auto score = detection::Evaluate(aggregate);
             policy::Evidence evidence{};
             evidence.timestamp_ms = GetTickCount64();
@@ -386,6 +425,8 @@ void Runtime::telemetryLoop() {
             evidence.data_quality = score.data_quality;
             evidence.event_type = static_cast<std::uint32_t>(protocol::EventType::DriverState);
             evidence.evidence_key = "behavioral_aggregate";
+            evidence.evidence_family = "behavioral";
+            evidence.target = cs2_identity_;
             policy_engine_.add(evidence);
             (void)evidence_.append(evidence);
         }
@@ -398,9 +439,16 @@ void Runtime::decisionLoop() {
     while (!stopping_.load(std::memory_order_acquire)) {
         const auto result = policy_engine_.evaluate();
         if (result.decision != previous) {
-            audit_.write("decision", std::string(DecisionName(result.decision)) +
+            audit::Record decision_rec{};
+            decision_rec.category = "decision";
+            decision_rec.message = std::string(DecisionName(result.decision)) +
                 " confidence=" + std::to_string(result.confidence) +
-                " supporting=" + std::to_string(result.supporting_events));
+                " supporting=" + std::to_string(result.supporting_events) +
+                " families=" + std::to_string(result.supporting_families);
+            decision_rec.monotonic_ms = GetTickCount64();
+            decision_rec.session_id = cs2_identity_.Key();
+            decision_rec.target = cs2_identity_;
+            audit_.write(decision_rec);
             previous = result.decision;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(500));

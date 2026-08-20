@@ -5,6 +5,7 @@
   "heartbeat_timeout_ms": 5000,
   "evidence_flush_ms": 1000,
   "minimum_supporting_events": 3,
+  "minimum_supporting_families": 2,
   "monitor_threshold": 0.70,
   "review_threshold": 0.82,
   "enforce_threshold": 0.93,

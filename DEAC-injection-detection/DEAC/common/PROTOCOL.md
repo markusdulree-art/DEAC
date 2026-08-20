@@ -17,4 +17,9 @@ This boundary is designed to reduce the blast radius of a compromised or buggy u
 
 ## Protocol v4 changes
 
-`kProtocolVersion` is now 4. `DriverStatus` includes `queue_dropped`, and `flags` exposes callback/queue capability bits from `DriverCapability`. Consumers must reject mismatched versions rather than guessing the layout.
+`kProtocolVersion` is now 5. `DriverStatus` includes `queue_dropped`, and `flags` exposes callback/queue capability bits from `DriverCapability`. Consumers must reject mismatched versions rather than guessing the layout.
+
+
+### Protocol v5 notes
+
+`DriverCapability` now separates `QueueOperational` from `QueueLossDetected`. `HandlePayload::granted_access` is zero during pre-operation telemetry because the callback observes requested access before the final handle grant decision; DEAC does not claim post-operation grant state from that event.

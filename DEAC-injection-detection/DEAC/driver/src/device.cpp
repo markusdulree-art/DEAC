@@ -42,9 +42,10 @@ NTSTATUS DeviceControl(PDEVICE_OBJECT, PIRP irp) {
         status.queue_dropped = deac::kernel::g_event_queue.Dropped();
         status.flags = DeacCallbackCapabilityFlags();
         if (deac::kernel::g_event_queue.Dropped() == 0) {
-            status.flags |= static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueHealthy);
+            status.flags |= static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueOperational);
+            status.flags &= ~static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueLossDetected);
         } else {
-            status.flags &= ~static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueHealthy);
+            status.flags |= static_cast<std::uint32_t>(deac::protocol::DriverCapability::QueueLossDetected);
         }
         status.platform = g_platform;
         RtlCopyMemory(irp->AssociatedIrp.SystemBuffer, &status, sizeof(status));
